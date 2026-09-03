@@ -1,1 +1,1 @@
-web: streamlit run app.py --server.port 8000 --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false --browser.gatherUsageStats false
+web: uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
