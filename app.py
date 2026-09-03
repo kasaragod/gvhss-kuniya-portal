@@ -12,7 +12,6 @@ app = FastAPI(title="GVHSS KUNIYA Unified Engine")
 DB_FILE = "kuniya_persistent.db"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# ലേറ്റസ്റ്റ് ഒഫീഷ്യൽ മോഡലുകൾ
 PRIMARY_MODEL = "gemini-3.6-flash"
 BACKUP_MODEL = "gemini-2.0-flash"
 
@@ -63,7 +62,6 @@ def init_db():
             );
         """)
         
-        # Default Accounts
         c.execute("SELECT username FROM users WHERE username = 'admin'")
         if not c.fetchone():
             c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
@@ -74,20 +72,15 @@ def init_db():
         c.execute("SELECT COUNT(*) FROM questions")
         if c.fetchone()[0] == 0:
             sample_qs = [
-                # Class 10 English Medium
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 1, "What is the common difference of the sequence: 5, 9, 13, 17...?", "2", "3", "4", "5", 2, "Common difference d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 2, "What is the 10th term of the sequence: 3, 7, 11, 15...?", "35", "39", "41", "43", 1, "x_n = 4n - 1. x_10 = 4(10) - 1 = 39."),
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 3, "What is the angle subtended in a semicircle?", "45°", "60°", "90°", "180°", 2, "Angle in a semicircle is always a right angle (90°)."),
                 ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electric resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms (Ω)."),
                 ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating effect: H = I²Rt?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's Law of Heating states heat produced is H = I²Rt."),
-                
-                # Class 10 Malayalam Medium
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "പൊതുവ്യത്യാസം d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 2, "ഒരു അർദ്ധവൃത്തത്തിലെ കോണിന്റെ അളവ് എത്ര?", "45°", "60°", "90°", "180°", 2, "അർദ്ധവൃത്തത്തിലെ കോൺ എപ്പോഴും 90 ഡിഗ്രി (മട്ടക്കോൺ) ആണ്."),
                 ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു."),
                 ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 2, "ആകാശത്തിന്റെ നീലനിറത്തിന് കാരണമായ പ്രകാശ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "വിസരണം", "പ്രകീർണ്ണനം", "അപവർത്തനം", 1, "പ്രകാശ വിസരണം (Scattering of Light) കാരണമാണ് ആകാശം നീലയായി കാണപ്പെടുന്നത്."),
-                
-                # Plus Two English
                 ("Plus Two (+2 Science)", "Physics", "English Medium", 1, "What is the SI unit of electric charge?", "Coulomb", "Volt", "Ampere", "Tesla", 0, "Charge is measured in Coulombs (C)."),
                 ("Plus Two (+2 Science)", "Physics", "English Medium", 2, "What is the capacitance of a capacitor storing 1 Coulomb at 1 Volt?", "1 Henry", "1 Farad", "1 Tesla", "1 Ohm", 1, "C = Q / V = 1 Farad.")
             ]
@@ -103,12 +96,18 @@ class LoginReq(BaseModel):
     password: str
 
 class UserAddReq(BaseModel):
+    admin_user: str
+    admin_pass: str
     username: str
     password: str
     name: str
     role: str
     student_class: str
     medium: str
+
+class DeleteUserReq(BaseModel):
+    admin_user: str
+    admin_pass: str
 
 class ScoreUpdateReq(BaseModel):
     username: str
@@ -121,6 +120,8 @@ class DoubtReq(BaseModel):
     query: str
 
 class NoticeReq(BaseModel):
+    admin_user: str
+    admin_pass: str
     notice_text: str
 
 # ----------------- API ROUTES -----------------
@@ -128,37 +129,50 @@ class NoticeReq(BaseModel):
 def login(req: LoginReq):
     with get_db() as conn:
         c = conn.cursor()
-        c.execute("SELECT username, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?", (req.username.strip().lower(), req.password.strip()))
+        c.execute("SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?", (req.username.strip().lower(), req.password.strip()))
         user = c.fetchone()
         if user:
-            return {"status": "ok", "user": dict(user)}
+            u_dict = dict(user)
+            # പാസ്‌വേഡ് റെസ്‌പോൺസിൽ നിന്ന് ഒഴിവാക്കുന്നു
+            del u_dict["password"]
+            return {"status": "ok", "user": u_dict}
         raise HTTPException(status_code=401, detail="Invalid User ID or Password")
 
+# അഡ്മിൻ മാത്രം ആക്സസ് ചെയ്യാനുള്ള റോൾ വെരിഫിക്കേഷൻ
+def verify_admin(c, u, p):
+    c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
+    row = c.fetchone()
+    if not row or row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access Denied: Only Administrator can perform this action.")
+
 @app.get("/api/users")
-def get_users():
+def get_users(admin_user: str, admin_pass: str):
     with get_db() as conn:
         c = conn.cursor()
+        verify_admin(c, admin_user, admin_pass)
         c.execute("SELECT username, name, role, student_class, medium, score FROM users ORDER BY role, name")
         return {"users": [dict(r) for r in c.fetchall()]}
 
 @app.post("/api/users")
 def add_user(req: UserAddReq):
-    try:
-        with get_db() as conn:
-            c = conn.cursor()
+    with get_db() as conn:
+        c = conn.cursor()
+        verify_admin(c, req.admin_user, req.admin_pass)
+        try:
             c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)", 
                       (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
             conn.commit()
             return {"status": "ok", "message": f"User {req.username} created successfully"}
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="Username already exists")
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="Username already exists")
 
-@app.delete("/api/users/{username}")
-def delete_user(username: str):
+@app.post("/api/users/delete/{username}")
+def delete_user(username: str, req: DeleteUserReq):
     if username == "admin":
         raise HTTPException(status_code=400, detail="Default admin cannot be removed")
     with get_db() as conn:
         c = conn.cursor()
+        verify_admin(c, req.admin_user, req.admin_pass)
         c.execute("DELETE FROM users WHERE username = ?", (username,))
         conn.commit()
         return {"status": "ok"}
@@ -175,6 +189,7 @@ def get_notice():
 def set_notice(req: NoticeReq):
     with get_db() as conn:
         c = conn.cursor()
+        verify_admin(c, req.admin_user, req.admin_pass)
         c.execute("INSERT INTO notices (notice_text) VALUES (?)", (req.notice_text.strip(),))
         conn.commit()
         return {"status": "ok"}
@@ -191,11 +206,9 @@ def get_question(target_class: str, subject: str, medium: str, level: int = 1):
         """, (target_class, subject, medium))
         row = c.fetchone()
         if not row:
-            # Fallback to any question in that class & medium
             c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE target_class = ? AND medium = ? ORDER BY RANDOM() LIMIT 1", (target_class, medium))
             row = c.fetchone()
         if not row:
-            # General fallback to medium
             c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE medium = ? ORDER BY RANDOM() LIMIT 1", (medium,))
             row = c.fetchone()
         if row:
@@ -211,13 +224,6 @@ def update_score(req: ScoreUpdateReq):
         new_score = c.fetchone()["score"]
         conn.commit()
         return {"new_score": new_score}
-
-@app.get("/api/leaderboard")
-def get_leaderboard():
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT name, student_class, score FROM users WHERE role = 'student' ORDER BY score DESC LIMIT 5")
-        return {"leaders": [dict(r) for r in c.fetchall()]}
 
 @app.post("/api/doubt")
 def ask_doubt(req: DoubtReq):
@@ -296,7 +302,6 @@ def index():
 
     <!-- MAIN DASHBOARD -->
     <div id="main-panel" class="w-full max-w-6xl hidden flex-col space-y-5">
-        <!-- Header -->
         <header class="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-wrap justify-between items-center shadow-lg gap-4">
             <div>
                 <h1 class="text-2xl font-black text-amber-400">GVHSS KUNIYA</h1>
@@ -311,7 +316,6 @@ def index():
             </div>
         </header>
 
-        <!-- Broadcast Notice -->
         <div id="notice-display" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 text-sm font-medium"></div>
 
         <!-- Academic Selectors -->
@@ -407,7 +411,7 @@ def index():
             <iframe id="jitsi-stage" src="" class="w-full h-[620px] rounded-3xl border border-slate-800" allow="camera; microphone; fullscreen; display-capture"></iframe>
         </div>
 
-        <!-- VIEW 4: ADMIN CONSOLE (ONLY FOR ADMIN) -->
+        <!-- VIEW 4: ADMIN CONSOLE (ONLY FOR ROLE: ADMIN) -->
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
                 <h3 class="text-xl font-black text-amber-400">Administrative Control Hub</h3>
@@ -459,6 +463,7 @@ def index():
 
     <script>
         let me = null;
+        let adminAuth = { u: '', p: '' };
         let activeQ = null;
         let timer = null;
         let timeLeft = 30;
@@ -512,19 +517,26 @@ def index():
                 const d = await r.json();
                 if(r.ok) {
                     me = d.user;
+                    if(me.role === 'admin') {
+                        adminAuth = { u: u, p: p };
+                    } else {
+                        adminAuth = { u: '', p: '' };
+                    }
+
                     document.getElementById('auth-panel').classList.add('hidden');
                     document.getElementById('main-panel').classList.remove('hidden');
                     document.getElementById('main-panel').classList.add('flex');
                     document.getElementById('usr-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
                     document.getElementById('score-tag').innerText = `🏆 ${me.score.toLocaleString()} Pts`;
                     
-                    // IF STUDENT: LOCK TO THEIR ASSIGNED CLASS & MEDIUM
+                    // സെക്യൂരിറ്റി: സ്റ്റുഡന്റ് ആണെങ്കിൽ ക്ലാസ്സും മീഡിയവും ലോക്ക് ചെയ്യുക, അഡ്മിൻ ടാബ് ഒളിപ്പിക്കുക
                     if(me.role === 'student') {
                         document.getElementById('sel-class').value = me.student_class;
                         document.getElementById('sel-med').value = me.medium;
                         document.getElementById('sel-class').disabled = true;
                         document.getElementById('sel-med').disabled = true;
                         document.getElementById('tb-admin').classList.add('hidden');
+                        document.getElementById('view-admin').classList.add('hidden');
                     } else if(me.role === 'admin') {
                         document.getElementById('sel-class').disabled = false;
                         document.getElementById('sel-med').disabled = false;
@@ -544,10 +556,13 @@ def index():
 
         function handleLogout() {
             me = null;
+            adminAuth = { u: '', p: '' };
             clearInterval(timer);
             document.getElementById('main-panel').classList.add('hidden');
             document.getElementById('main-panel').classList.remove('flex');
             document.getElementById('auth-panel').classList.remove('hidden');
+            document.getElementById('tb-admin').classList.add('hidden');
+            document.getElementById('view-admin').classList.add('hidden');
         }
 
         async function fetchNotice() {
@@ -703,8 +718,10 @@ def index():
         }
 
         async function fetchUserDirectory() {
-            const r = await fetch('/api/users');
+            if(!me || me.role !== 'admin') return;
+            const r = await fetch(`/api/users?admin_user=${encodeURIComponent(adminAuth.u)}&admin_pass=${encodeURIComponent(adminAuth.p)}`);
             const d = await r.json();
+            if(!r.ok) return;
             const box = document.getElementById('user-table');
             box.innerHTML = '';
             d.users.forEach(u => {
@@ -722,7 +739,13 @@ def index():
 
         async function createUser(e) {
             e.preventDefault();
+            if(!me || me.role !== 'admin') {
+                alert("Unauthorized!");
+                return;
+            }
             const body = {
+                admin_user: adminAuth.u,
+                admin_pass: adminAuth.p,
                 username: document.getElementById('new-u').value,
                 password: document.getElementById('new-p').value,
                 name: document.getElementById('new-name').value,
@@ -732,7 +755,7 @@ def index():
             };
             const r = await fetch('/api/users', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             if(r.ok) {
-                alert("Account created successfully!");
+                alert("Account enrolled successfully!");
                 e.target.reset();
                 fetchUserDirectory();
             } else {
@@ -742,15 +765,25 @@ def index():
         }
 
         async function removeUser(username) {
+            if(!me || me.role !== 'admin') return;
             if(!confirm(`Delete user ${username}?`)) return;
-            const r = await fetch(`/api/users/${username}`, { method: 'DELETE' });
+            const r = await fetch(`/api/users/delete/${username}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ admin_user: adminAuth.u, admin_pass: adminAuth.p })
+            });
             if(r.ok) fetchUserDirectory();
         }
 
         async function postNotice() {
+            if(!me || me.role !== 'admin') return;
             const text = document.getElementById('new-notice').value;
             if(!text) return;
-            const r = await fetch('/api/notice', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({notice_text: text}) });
+            const r = await fetch('/api/notice', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ admin_user: adminAuth.u, admin_pass: adminAuth.p, notice_text: text }) 
+            });
             if(r.ok) {
                 document.getElementById('new-notice').value = '';
                 fetchNotice();
@@ -759,6 +792,12 @@ def index():
         }
 
         function nav(tabId) {
+            // സുരക്ഷ: അഡ്മിൻ അല്ലാതെ അഡ്മിൻ ടാബിലേക്ക് പോകാൻ ശ്രമിച്ചാൽ ബ്ലോക്ക് ചെയ്യുക
+            if(tabId === 'admin' && (!me || me.role !== 'admin')) {
+                alert("Access Denied: Only administrators have access to this section.");
+                return;
+            }
+
             ['kbc', 'tutor', 'live', 'admin'].forEach(i => {
                 document.getElementById(`view-${i}`).classList.add('hidden');
                 document.getElementById(`tb-${i}`).className = "px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white";
