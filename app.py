@@ -2,7 +2,8 @@ import os
 import json
 import random
 import re
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ from google import genai
 
 app = FastAPI(title="GVHSS KUNIYA Unified Engine")
 
-DB_FILE = "kuniya_persistent.db"
+DATABASE_URL = os.environ.get("DATABASE_URL")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 PRIMARY_MODEL = "gemini-3.6-flash"
@@ -18,104 +19,112 @@ BACKUP_MODEL = "gemini-2.0-flash"
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# ----------------- DATABASE -----------------
+# ----------------- POSTGRESQL PERSISTENCE -----------------
 def get_db():
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    return conn
+    if not DATABASE_URL:
+        # Fallback to local SQLite if DATABASE_URL is missing
+        import sqlite3
+        conn = sqlite3.connect("kuniya_persistent.db", timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+def is_postgres():
+    return bool(DATABASE_URL)
 
 def init_db():
-    with get_db() as conn:
-        c = conn.cursor()
+    conn = get_db()
+    c = conn.cursor()
+    
+    if is_postgres():
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password TEXT NOT NULL,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                student_class TEXT NOT NULL,
-                medium TEXT NOT NULL,
-                score INTEGER DEFAULT 0
+                username VARCHAR(50) PRIMARY KEY,
+                password VARCHAR(100) NOT NULL,
+                name VARCHAR(100) NOT NULL,
+                role VARCHAR(20) NOT NULL,
+                student_class VARCHAR(50) NOT NULL,
+                medium VARCHAR(30) NOT NULL,
+                score INT DEFAULT 0
             );
-        """)
-        c.execute("""
             CREATE TABLE IF NOT EXISTS notices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 notice_text TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS live_links (
-                target_class TEXT PRIMARY KEY,
-                meet_url TEXT NOT NULL,
-                updated_by TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS live_rooms (
+                target_class VARCHAR(50) PRIMARY KEY,
+                room_id VARCHAR(100) NOT NULL,
+                updated_by VARCHAR(50) NOT NULL
             );
-        """)
-        c.execute("""
             CREATE TABLE IF NOT EXISTS questions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                target_class TEXT NOT NULL,
-                subject TEXT NOT NULL,
-                medium TEXT NOT NULL,
-                level INTEGER NOT NULL,
+                id SERIAL PRIMARY KEY,
+                target_class VARCHAR(50) NOT NULL,
+                subject VARCHAR(50) NOT NULL,
+                medium VARCHAR(30) NOT NULL,
+                level INT NOT NULL,
                 question TEXT NOT NULL,
                 opt_a TEXT NOT NULL,
                 opt_b TEXT NOT NULL,
                 opt_c TEXT NOT NULL,
                 opt_d TEXT NOT NULL,
-                correct_idx INTEGER NOT NULL,
+                correct_idx INT NOT NULL,
                 explanation TEXT NOT NULL
             );
         """)
-        
-        # Default Accounts
-        c.execute("SELECT username FROM users WHERE username = 'admin'")
+        c.execute("SELECT username FROM users WHERE username = 'admin';")
         if not c.fetchone():
-            c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
-            c.execute("INSERT OR IGNORE INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
-            c.execute("INSERT OR IGNORE INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0)")
-            c.execute("INSERT OR IGNORE INTO users VALUES ('student2', 'student123', 'Fathima N', 'student', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
-            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live for 10th, +1, and +2.')")
+            c.execute("INSERT INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0);")
+            c.execute("INSERT INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0);")
+            c.execute("INSERT INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0);")
+            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live with permanent data storage.');")
             
-        # Default Meet Links
-        classes = ["Class 10 (SSLC)", "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus Two (+2 Science)", "Plus Two (+2 Commerce)"]
-        for cls in classes:
-            c.execute("INSERT OR IGNORE INTO live_links VALUES (?, ?, ?)", (cls, "https://meet.google.com/", "Admin"))
-            
-        # Seed questions
-        c.execute("SELECT COUNT(*) FROM questions")
-        if c.fetchone()[0] == 0:
+            classes = ["Class 10 (SSLC)", "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus Two (+2 Science)", "Plus Two (+2 Commerce)"]
+            for cls in classes:
+                clean_cls = re.sub(r'[^a-zA-Z0-9]', '', cls)
+                c.execute("INSERT INTO live_rooms VALUES (%s, %s, 'Admin');", (cls, f"GVHSS_KUNIYA_{clean_cls}_2026"))
+                
             sample_qs = [
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 1, "What is the common difference of the sequence: 5, 9, 13, 17...?", "2", "3", "4", "5", 2, "Common difference d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 2, "What is the 10th term of the sequence: 3, 7, 11, 15...?", "35", "39", "41", "43", 1, "x_n = 4n - 1. x_10 = 4(10) - 1 = 39."),
-                ("Class 10 (SSLC)", "Mathematics", "English Medium", 3, "What is the angle subtended in a semicircle?", "45°", "60°", "90°", "180°", 2, "Angle in a semicircle is always a right angle (90°)."),
                 ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electric resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms (Ω)."),
-                ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating effect: H = I^2 * R * t?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's Law of Heating states heat produced is H = I^2 * R * t."),
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "പൊതുവ്യത്യാസം d = 9 - 5 = 4."),
-                ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 2, "ഒരു അർദ്ധവൃത്തത്തിലെ കോണിന്റെ അളവ് എത്ര?", "45°", "60°", "90°", "180°", 2, "അർദ്ധവൃത്തത്തിലെ കോൺ എപ്പോഴും 90 ഡിഗ്രി (മട്ടക്കോൺ) ആണ്."),
-                ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു."),
-                ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 2, "ആകാശത്തിന്റെ നീലനിറത്തിന് കാരണമായ പ്രകാശ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "വിസരണം", "പ്രകീർണ്ണനം", "അപവർത്തനം", 1, "പ്രകാശ വിസരണം (Scattering of Light) കാരണമാണ് ആകാശം നീലയായി കാണപ്പെടുന്നത്."),
-                ("Plus Two (+2 Science)", "Physics", "English Medium", 1, "What is the SI unit of electric charge?", "Coulomb", "Volt", "Ampere", "Tesla", 0, "Charge is measured in Coulombs (C)."),
-                ("Plus Two (+2 Science)", "Physics", "English Medium", 2, "What is the capacitance of a capacitor storing 1 Coulomb at 1 Volt?", "1 Henry", "1 Farad", "1 Tesla", "1 Ohm", 1, "C = Q / V = 1 Farad.")
+                ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു.")
             ]
             for q in sample_qs:
-                c.execute("INSERT INTO questions (target_class, subject, medium, level, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", q)
-        conn.commit()
+                c.execute("""
+                    INSERT INTO questions (target_class, subject, medium, level, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """, q)
+    else:
+        # SQLite execution
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT, student_class TEXT, medium TEXT, score INT);
+            CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY AUTOINCREMENT, notice_text TEXT);
+            CREATE TABLE IF NOT EXISTS live_rooms (target_class TEXT PRIMARY KEY, room_id TEXT, updated_by TEXT);
+            CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, target_class TEXT, subject TEXT, medium TEXT, level INT, question TEXT, opt_a TEXT, opt_b TEXT, opt_c TEXT, opt_d TEXT, correct_idx INT, explanation TEXT);
+        """)
+        c.execute("SELECT username FROM users WHERE username = 'admin'")
+        if not c.fetchone():
+            c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
+            c.execute("INSERT OR IGNORE INTO notices (notice_text) VALUES ('GVHSS KUNIYA Portal Active.')")
 
-init_db()
+    conn.commit()
+    conn.close()
+
+try:
+    init_db()
+except Exception as e:
+    print(f"DB Init check: {e}")
 
 # ----------------- CLEAN PLAIN TEXT FORMATTER -----------------
-def sanitize_ai_output(text: str) -> str:
-    # Strip markdown math and LaTeX delimiters
+def clean_ai_text(text: str) -> str:
     text = text.replace("$$", "").replace("$", "")
     text = re.sub(r"\\\[(.*?)\\\]", r"\1", text)
     text = re.sub(r"\\\((.*?)\\\)", r"\1", text)
     text = re.sub(r"\\text\{([^}]*)\}", r"\1", text)
     text = re.sub(r"\\frac\{([^}]*)\}\{([^}]*)\}", r"(\1 / \2)", text)
     text = text.replace(r"\times", "×").replace(r"\div", "÷").replace(r"\dots", "...")
-    # Clean unwanted asterisks and hashes
     text = text.replace("**", "").replace("###", "").replace("##", "")
     return text.strip()
 
@@ -138,11 +147,11 @@ class AuthActionReq(BaseModel):
     auth_user: str
     auth_pass: str
 
-class MeetUpdateReq(BaseModel):
+class RoomUpdateReq(BaseModel):
     auth_user: str
     auth_pass: str
     target_class: str
-    meet_url: str
+    room_id: str
 
 class ScoreUpdateReq(BaseModel):
     username: str
@@ -161,161 +170,175 @@ class NoticeReq(BaseModel):
 
 # ----------------- API ROUTES -----------------
 def verify_staff(c, u, p):
-    c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
+    query = "SELECT role FROM users WHERE username = %s AND password = %s" if is_postgres() else "SELECT role FROM users WHERE username = ? AND password = ?"
+    c.execute(query, (u.strip().lower(), p.strip()))
     row = c.fetchone()
     if not row or row["role"] not in ["admin", "teacher"]:
-        raise HTTPException(status_code=403, detail="Permission Denied: Staff access required.")
+        raise HTTPException(status_code=403, detail="Staff access required.")
     return row["role"]
 
 def verify_admin(c, u, p):
-    c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
+    query = "SELECT role FROM users WHERE username = %s AND password = %s" if is_postgres() else "SELECT role FROM users WHERE username = ? AND password = ?"
+    c.execute(query, (u.strip().lower(), p.strip()))
     row = c.fetchone()
     if not row or row["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Permission Denied: Only Administrator can perform this action.")
+        raise HTTPException(status_code=403, detail="Administrator access required.")
 
 @app.post("/api/login")
 def login(req: LoginReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT username, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?", (req.username.strip().lower(), req.password.strip()))
-        user = c.fetchone()
-        if user:
-            return {"status": "ok", "user": dict(user)}
-        raise HTTPException(status_code=401, detail="Invalid User ID or Password")
+    conn = get_db()
+    c = conn.cursor()
+    query = "SELECT username, name, role, student_class, medium, score FROM users WHERE username = %s AND password = %s" if is_postgres() else "SELECT username, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?"
+    c.execute(query, (req.username.strip().lower(), req.password.strip()))
+    user = c.fetchone()
+    conn.close()
+    if user:
+        return {"status": "ok", "user": dict(user)}
+    raise HTTPException(status_code=401, detail="Invalid User ID or Password")
 
 @app.get("/api/users")
 def get_users(auth_user: str, auth_pass: str):
-    with get_db() as conn:
-        c = conn.cursor()
-        verify_admin(c, auth_user, auth_pass)
-        c.execute("SELECT username, name, role, student_class, medium, score FROM users ORDER BY role, name")
-        return {"users": [dict(r) for r in c.fetchall()]}
+    conn = get_db()
+    c = conn.cursor()
+    verify_admin(c, auth_user, auth_pass)
+    c.execute("SELECT username, name, role, student_class, medium, score FROM users ORDER BY role, name")
+    users = c.fetchall()
+    conn.close()
+    return {"users": [dict(r) for r in users]}
 
 @app.post("/api/users")
 def add_user(req: UserAddReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        verify_admin(c, req.auth_user, req.auth_pass)
-        try:
-            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)", 
-                      (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
-            conn.commit()
-            return {"status": "ok", "message": f"User {req.username} created successfully"}
-        except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="Username already exists")
+    conn = get_db()
+    c = conn.cursor()
+    verify_admin(c, req.auth_user, req.auth_pass)
+    try:
+        query = "INSERT INTO users VALUES (%s, %s, %s, %s, %s, %s, 0)" if is_postgres() else "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)"
+        c.execute(query, (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": f"User {req.username} saved permanently."}
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Username already exists")
 
 @app.post("/api/users/delete/{username}")
 def delete_user(username: str, req: AuthActionReq):
     if username == "admin":
         raise HTTPException(status_code=400, detail="Default admin cannot be removed")
-    with get_db() as conn:
-        c = conn.cursor()
-        verify_admin(c, req.auth_user, req.auth_pass)
-        c.execute("DELETE FROM users WHERE username = ?", (username,))
-        conn.commit()
-        return {"status": "ok"}
+    conn = get_db()
+    c = conn.cursor()
+    verify_admin(c, req.auth_user, req.auth_pass)
+    query = "DELETE FROM users WHERE username = %s" if is_postgres() else "DELETE FROM users WHERE username = ?"
+    c.execute(query, (username,))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
-@app.get("/api/live-link")
-def get_live_link(target_class: str):
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT meet_url, updated_by FROM live_links WHERE target_class = ?", (target_class,))
-        row = c.fetchone()
-        return {"meet_url": row["meet_url"] if row else "https://meet.google.com/", "updated_by": row["updated_by"] if row else "Admin"}
+@app.get("/api/live-room")
+def get_live_room(target_class: str):
+    conn = get_db()
+    c = conn.cursor()
+    query = "SELECT room_id, updated_by FROM live_rooms WHERE target_class = %s" if is_postgres() else "SELECT room_id, updated_by FROM live_rooms WHERE target_class = ?"
+    c.execute(query, (target_class,))
+    row = c.fetchone()
+    conn.close()
+    clean_cls = re.sub(r'[^a-zA-Z0-9]', '', target_class)
+    return {"room_id": row["room_id"] if row else f"GVHSS_{clean_cls}_HQ", "updated_by": row["updated_by"] if row else "Admin"}
 
-@app.post("/api/live-link")
-def set_live_link(req: MeetUpdateReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        verify_staff(c, req.auth_user, req.auth_pass)
-        clean_url = req.meet_url.strip()
-        if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
-            clean_url = "https://" + clean_url
-        c.execute("INSERT OR REPLACE INTO live_links (target_class, meet_url, updated_by) VALUES (?, ?, ?)", 
-                  (req.target_class, clean_url, req.auth_user))
-        conn.commit()
-        return {"status": "ok", "meet_url": clean_url}
+@app.post("/api/live-room")
+def set_live_room(req: RoomUpdateReq):
+    conn = get_db()
+    c = conn.cursor()
+    verify_staff(c, req.auth_user, req.auth_pass)
+    clean_room = re.sub(r'[^a-zA-Z0-9_-]', '', req.room_id.strip())
+    if is_postgres():
+        c.execute("""
+            INSERT INTO live_rooms (target_class, room_id, updated_by) VALUES (%s, %s, %s)
+            ON CONFLICT (target_class) DO UPDATE SET room_id = EXCLUDED.room_id, updated_by = EXCLUDED.updated_by;
+        """, (req.target_class, clean_room, req.auth_user))
+    else:
+        c.execute("INSERT OR REPLACE INTO live_rooms VALUES (?, ?, ?)", (req.target_class, clean_room, req.auth_user))
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "room_id": clean_room}
 
 @app.get("/api/notice")
 def get_notice():
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1")
-        row = c.fetchone()
-        return {"notice": row["notice_text"] if row else "Welcome to GVHSS KUNIYA."}
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+    return {"notice": row["notice_text"] if row else "Welcome to GVHSS KUNIYA."}
 
 @app.post("/api/notice")
 def set_notice(req: NoticeReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        verify_staff(c, req.auth_user, req.auth_pass)
-        c.execute("INSERT INTO notices (notice_text) VALUES (?)", (req.notice_text.strip(),))
-        conn.commit()
-        return {"status": "ok"}
+    conn = get_db()
+    c = conn.cursor()
+    verify_staff(c, req.auth_user, req.auth_pass)
+    query = "INSERT INTO notices (notice_text) VALUES (%s)" if is_postgres() else "INSERT INTO notices (notice_text) VALUES (?)"
+    c.execute(query, (req.notice_text.strip(),))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 @app.get("/api/question")
-def get_question(target_class: str, subject: str, medium: str, level: int = 1):
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("""
-            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level 
-            FROM questions 
-            WHERE target_class = ? AND subject = ? AND medium = ?
-            ORDER BY RANDOM() LIMIT 1
-        """, (target_class, subject, medium))
+def get_question(target_class: str, subject: str, medium: str):
+    conn = get_db()
+    c = conn.cursor()
+    query = "SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE target_class = %s AND subject = %s AND medium = %s ORDER BY RANDOM() LIMIT 1" if is_postgres() else "SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE target_class = ? AND subject = ? AND medium = ? ORDER BY RANDOM() LIMIT 1"
+    c.execute(query, (target_class, subject, medium))
+    row = c.fetchone()
+    if not row:
+        fallback_query = "SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE medium = %s ORDER BY RANDOM() LIMIT 1" if is_postgres() else "SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE medium = ? ORDER BY RANDOM() LIMIT 1"
+        c.execute(fallback_query, (medium,))
         row = c.fetchone()
-        if not row:
-            c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE target_class = ? AND medium = ? ORDER BY RANDOM() LIMIT 1", (target_class, medium))
-            row = c.fetchone()
-        if not row:
-            c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE medium = ? ORDER BY RANDOM() LIMIT 1", (medium,))
-            row = c.fetchone()
-        if row:
-            return {"question": dict(row)}
-        return {"question": None}
+    conn.close()
+    return {"question": dict(row) if row else None}
 
 @app.post("/api/score")
 def update_score(req: ScoreUpdateReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("UPDATE users SET score = score + ? WHERE username = ?", (req.points, req.username))
-        c.execute("SELECT score FROM users WHERE username = ?", (req.username,))
-        new_score = c.fetchone()["score"]
-        conn.commit()
-        return {"new_score": new_score}
+    conn = get_db()
+    c = conn.cursor()
+    query = "UPDATE users SET score = score + %s WHERE username = %s" if is_postgres() else "UPDATE users SET score = score + ? WHERE username = ?"
+    c.execute(query, (req.points, req.username))
+    fetch_query = "SELECT score FROM users WHERE username = %s" if is_postgres() else "SELECT score FROM users WHERE username = ?"
+    c.execute(fetch_query, (req.username,))
+    new_score = c.fetchone()["score"]
+    conn.commit()
+    conn.close()
+    return {"new_score": new_score}
 
 @app.post("/api/doubt")
 def ask_doubt(req: DoubtReq):
     if not ai_client:
-        return {"answer": "AI key is not configured in Koyeb environment variables."}
+        return {"answer": "AI key is not configured in environment variables."}
     
     prompt = f"""
-    You are an expert Kerala SCERT textbook teacher for GVHSS KUNIYA school.
+    You are an expert Kerala SCERT textbook educator for GVHSS KUNIYA.
     Class: {req.student_class}
     Subject: {req.subject}
     Medium: {req.medium}
 
-    Formatting and Syntax Rules (STRICT):
-    1. Do NOT use LaTeX or any dollar signs ($ or $$).
-    2. Do NOT use markdown bold stars (**) or headers (###).
-    3. Write all mathematical steps, equations, and expressions using standard plain text and readable symbols only (e.g. x10, S20, +, -, *, /, =, sqrt()).
-    4. If Medium is 'Malayalam Medium', explain in clear, natural Malayalam.
-    5. If Medium is 'English Medium', explain in direct, student-friendly English.
-    6. Provide a concise, step-by-step solution matching the Kerala SCERT textbook standard.
+    Mandatory Rules:
+    1. Do not use LaTeX, dollar signs ($ or $$), or markdown formatting stars.
+    2. Write formulas in clean plain text only (e.g., x10, S20, +, -, *, /, =, sqrt).
+    3. If Medium is 'Malayalam Medium', reply strictly in natural Malayalam.
+    4. If Medium is 'English Medium', reply in clear, concise English.
 
     Question: {req.query}
     """
     try:
         res = ai_client.models.generate_content(model=PRIMARY_MODEL, contents=prompt)
-        return {"answer": sanitize_ai_output(res.text)}
+        return {"answer": clean_ai_text(res.text)}
     except Exception:
         try:
             res = ai_client.models.generate_content(model=BACKUP_MODEL, contents=prompt)
-            return {"answer": sanitize_ai_output(res.text)}
+            return {"answer": clean_ai_text(res.text)}
         except Exception as e:
-            return {"answer": f"Tutor engine error: {str(e)}"}
+            return {"answer": f"Tutor error: {str(e)}"}
 
-# ----------------- FRONTEND UI -----------------
+# ----------------- FRONTEND UI (IN-APP UNLIMITED VIDEO) -----------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -324,9 +347,9 @@ def index():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GVHSS KUNIYA - Advanced KBC Learning Platform</title>
+    <title>GVHSS KUNIYA - Advanced Smart Campus</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Gayathri:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070B14; color: #F8FAFC; }
         .kbc-arena { background: radial-gradient(circle at center, #111D4A 0%, #060A17 100%); border: 2px solid #E5A93B; box-shadow: 0 0 35px rgba(229, 169, 59, 0.25); }
@@ -342,7 +365,7 @@ def index():
         <div class="text-center mb-6">
             <span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-bold uppercase tracking-wider">Official Portal</span>
             <h1 class="text-3xl font-black text-white mt-3">GVHSS KUNIYA</h1>
-            <p class="text-slate-400 text-sm mt-1">Kerala SCERT • SSLC, +1, +2 Campus</p>
+            <p class="text-slate-400 text-sm mt-1">Kerala SCERT • SSLC, +1, +2</p>
         </div>
         <form onsubmit="handleLogin(event)" class="space-y-4">
             <div>
@@ -376,7 +399,7 @@ def index():
 
         <div id="notice-display" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 text-sm font-medium"></div>
 
-        <!-- Academic Selectors -->
+        <!-- Academic Selectors (Locked for students) -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-900 p-4 rounded-2xl border border-slate-800">
             <div>
                 <label class="text-xs text-slate-400 font-bold uppercase">Class Level</label>
@@ -404,7 +427,7 @@ def index():
         <!-- Navigation Tabs -->
         <div class="flex space-x-2 border-b border-slate-800 pb-2">
             <button onclick="nav('kbc')" id="tb-kbc" class="px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black">🏆 KBC Arena</button>
-            <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 Live Classroom (Meet)</button>
+            <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 Unlimited Live Class</button>
             <button onclick="nav('tutor')" id="tb-tutor" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🤖 SCERT AI Tutor</button>
             <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Control Panel</button>
         </div>
@@ -436,7 +459,7 @@ def index():
                 </div>
 
                 <div id="ans-feedback" class="hidden p-4 rounded-2xl text-sm font-semibold"></div>
-                <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question (അടുത്ത ചോദ്യം)</button>
+                <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question</button>
             </div>
 
             <!-- Ladder -->
@@ -455,60 +478,38 @@ def index():
             </div>
         </div>
 
-        <!-- VIEW 2: LIVE CLASSROOM (GOOGLE MEET) -->
-        <div id="view-live" class="hidden bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-6">
-            <div class="max-w-xl mx-auto space-y-3">
-                <div class="inline-flex p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400">
-                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+        <!-- VIEW 2: UNLIMITED LIVE CLASS (NO APP LOGIN REQUIRED) -->
+        <div id="view-live" class="hidden flex-col space-y-4">
+            <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <div>
+                    <h3 id="live-header" class="text-lg font-black text-emerald-400">Classroom Live Stream</h3>
+                    <p class="text-xs text-slate-400">50-60 students capacity • Unlimited hours • Direct browser access</p>
                 </div>
-                <h3 id="live-class-header" class="text-2xl font-black text-white">Live Classroom</h3>
-                <p id="live-class-sub" class="text-slate-400 text-sm">Join the official high-speed Google Meet session for your registered batch.</p>
-                <div class="pt-4">
-                    <a id="btn-join-meet" href="https://meet.google.com/" target="_blank" class="inline-block w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg px-8 py-4 rounded-2xl shadow-xl transition transform hover:scale-105">
-                        🎥 Join Google Meet Session
-                    </a>
-                </div>
-                <p id="meet-updated-tag" class="text-xs text-slate-500 pt-2"></p>
+                <button onclick="reloadLiveFrame()" class="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700">🔄 Reconnect Camera/Mic</button>
             </div>
+            <iframe id="live-frame" class="w-full h-[640px] rounded-3xl border border-slate-800 bg-slate-950" allow="camera; microphone; fullscreen; display-capture"></iframe>
         </div>
 
         <!-- VIEW 3: AI SCERT TUTOR -->
         <div id="view-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4">
             <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT Deep Learning Tutor</h3>
-            <p class="text-xs text-slate-400">Explanations in clean, readable text without code or formula clutter.</p>
+            <p class="text-xs text-slate-400">Clean, human-readable textbook explanations without code clutter.</p>
             <textarea id="tutor-in" placeholder="Ask your textbook doubt..." class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
             <button onclick="requestDoubtSolution()" class="bg-amber-500 hover:bg-amber-400 text-black font-black px-6 py-3 rounded-xl shadow-md">Solve Textbook Doubt</button>
             <div id="tutor-out" class="text-slate-200 text-sm leading-relaxed whitespace-pre-line bg-slate-800/80 p-5 rounded-2xl border border-slate-700 hidden"></div>
         </div>
 
-        <!-- VIEW 4: ADMIN & TEACHER CONTROL PANEL -->
+        <!-- VIEW 4: ADMIN CONTROL PANEL -->
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
-                <h3 class="text-xl font-black text-amber-400">Control Hub</h3>
-                <p class="text-xs text-slate-400 mt-1">Manage Google Meet classrooms, school notices, and student registrations.</p>
+                <h3 class="text-xl font-black text-amber-400">Control Hub (Permanent Storage)</h3>
+                <p class="text-xs text-slate-400 mt-1">Users added here are saved permanently in PostgreSQL.</p>
             </div>
 
-            <!-- Google Meet Link Updater -->
-            <div class="bg-slate-800/40 border border-slate-800 p-4 rounded-2xl space-y-3">
-                <h4 class="font-bold text-sm text-emerald-400">🎥 Update Google Meet Link for Class</h4>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <select id="meet-cls" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                        <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
-                        <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
-                        <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
-                        <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
-                        <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
-                    </select>
-                    <input id="meet-link-input" type="text" placeholder="Paste Google Meet Link (e.g. meet.google.com/abc-defg-hij)" class="sm:col-span-2 bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
-                </div>
-                <button onclick="saveMeetLink()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-xl text-sm">Save Meet Link</button>
-            </div>
-
-            <!-- Add User Form (Admin Only) -->
-            <div id="admin-user-sec" class="hidden space-y-3 border-t border-slate-800 pt-4">
+            <div id="admin-user-sec" class="hidden space-y-3">
                 <h4 class="font-bold text-sm text-slate-300">Enroll New Student / Staff</h4>
                 <form onsubmit="createUser(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <input id="new-u" type="text" placeholder="Username / Student ID" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                    <input id="new-u" type="text" placeholder="Username / ID" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
                     <input id="new-p" type="password" placeholder="Password" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
                     <input id="new-name" type="text" placeholder="Full Name" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
                     
@@ -531,20 +532,19 @@ def index():
                         <option value="Malayalam Medium">Malayalam Medium</option>
                     </select>
                     
-                    <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Enroll & Register Account</button>
+                    <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Enroll Account Permanently</button>
                 </form>
 
                 <div>
-                    <h4 class="font-bold text-sm text-slate-300 mt-4 mb-2">Enrolled Student & Staff Directory</h4>
+                    <h4 class="font-bold text-sm text-slate-300 mt-4 mb-2">Registered Directory</h4>
                     <div id="user-table" class="space-y-2 max-h-56 overflow-y-auto pr-2"></div>
                 </div>
             </div>
 
-            <!-- Broadcast Notice -->
             <div class="border-t border-slate-800 pt-4">
-                <h4 class="font-bold text-sm text-slate-300 mb-2">Publish Notice</h4>
+                <h4 class="font-bold text-sm text-slate-300 mb-2">Publish School Notice</h4>
                 <div class="flex gap-2">
-                    <input id="new-notice" type="text" placeholder="Type school announcement..." class="flex-1 bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-xl text-white text-sm">
+                    <input id="new-notice" type="text" placeholder="Announcement text..." class="flex-1 bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-xl text-white text-sm">
                     <button onclick="postNotice()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-5 py-2.5 rounded-xl text-sm">Broadcast</button>
                 </div>
             </div>
@@ -594,7 +594,7 @@ def index():
                 opt.value = i; opt.innerText = i; s.appendChild(opt);
             });
             resetKBC();
-            updateLiveMeetButton();
+            updateLiveFrame();
         }
 
         async function handleLogin(e) {
@@ -663,41 +663,20 @@ def index():
             document.getElementById('notice-display').innerText = `📢 Official Announcement: ${d.notice}`;
         }
 
-        async function updateLiveMeetButton() {
+        async function updateLiveFrame() {
             const targetClass = document.getElementById('sel-class').value;
-            document.getElementById('live-class-header').innerText = `${targetClass} • Live Classroom`;
-            const r = await fetch(`/api/live-link?target_class=${encodeURIComponent(targetClass)}`);
+            document.getElementById('live-header').innerText = `${targetClass} • High-Capacity Classroom`;
+            const r = await fetch(`/api/live-room?target_class=${encodeURIComponent(targetClass)}`);
             const d = await r.json();
-            const btn = document.getElementById('btn-join-meet');
-            btn.href = d.meet_url;
-            document.getElementById('meet-updated-tag').innerText = `Current Link: ${d.meet_url} (Updated by: ${d.updated_by})`;
+            const room = d.room_id;
+            const displayName = encodeURIComponent(me ? `${me.name} (${me.role.toUpperCase()})` : "Student");
+            
+            // ടൈം ലിമിറ്റില്ലാത്ത ഓപ്പൺ വെബ്‌ആർടിസി ക്ലൗഡ് ഫ്രെയിം (ലോഗിൻ ആവശ്യമില്ല)
+            document.getElementById('live-frame').src = `https://meet.jit.si/${room}#config.prejoinPageEnabled=false&config.disableDeepLinking=true&userInfo.displayName="${displayName}"`;
         }
 
-        async function saveMeetLink() {
-            const targetClass = document.getElementById('meet-cls').value;
-            const meetUrl = document.getElementById('meet-link-input').value;
-            if(!meetUrl) {
-                alert("Please paste a valid Google Meet link.");
-                return;
-            }
-            const r = await fetch('/api/live-link', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    auth_user: staffAuth.u,
-                    auth_pass: staffAuth.p,
-                    target_class: targetClass,
-                    meet_url: meetUrl
-                })
-            });
-            if(r.ok) {
-                alert(`Google Meet link updated for ${targetClass}!`);
-                document.getElementById('meet-link-input').value = '';
-                updateLiveMeetButton();
-            } else {
-                const d = await r.json();
-                alert(d.detail);
-            }
+        function reloadLiveFrame() {
+            updateLiveFrame();
         }
 
         function startClock() {
@@ -744,7 +723,7 @@ def index():
             const prize = prizeLadder[currentStep - 1] || 1000;
             document.getElementById('kbc-step-tag').innerText = `QUESTION ${currentStep} • ₹${prize.toLocaleString()} PTS (${m})`;
 
-            const r = await fetch(`/api/question?target_class=${encodeURIComponent(c)}&subject=${encodeURIComponent(s)}&medium=${encodeURIComponent(m)}&level=${currentStep}`);
+            const r = await fetch(`/api/question?target_class=${encodeURIComponent(c)}&subject=${encodeURIComponent(s)}&medium=${encodeURIComponent(m)}`);
             const d = await r.json();
             activeQ = d.question;
             if(activeQ) {
@@ -875,7 +854,7 @@ def index():
             };
             const r = await fetch('/api/users', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
             if(r.ok) {
-                alert("Account enrolled successfully!");
+                alert("Account saved permanently!");
                 e.target.reset();
                 fetchUserDirectory();
             } else {
@@ -917,13 +896,13 @@ def index():
                 return;
             }
 
-            ['kbc', 'tutor', 'live', 'admin'].forEach(i => {
+            ['kbc', 'live', 'tutor', 'admin'].forEach(i => {
                 document.getElementById(`view-${i}`).classList.add('hidden');
                 document.getElementById(`tb-${i}`).className = "px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white";
             });
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             document.getElementById(`tb-${tabId}`).className = "px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black";
-            if(tabId === 'live') updateLiveMeetButton();
+            if(tabId === 'live') updateLiveFrame();
         }
     </script>
 </body>
