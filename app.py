@@ -12,13 +12,13 @@ app = FastAPI(title="GVHSS KUNIYA Unified Engine")
 DB_FILE = "kuniya_persistent.db"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 2026 നിലവിലെ ലേറ്റസ്റ്റ് പ്രൊഡക്ഷൻ മോഡലുകൾ
+# ലേറ്റസ്റ്റ് ഒഫീഷ്യൽ മോഡലുകൾ
 PRIMARY_MODEL = "gemini-3.6-flash"
-FALLBACK_MODEL = "gemini-2.5-flash"
+BACKUP_MODEL = "gemini-2.0-flash"
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# ----------------- DATABASE MANAGEMENT -----------------
+# ----------------- DATABASE -----------------
 def get_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.row_factory = sqlite3.Row
@@ -34,8 +34,8 @@ def init_db():
                 password TEXT NOT NULL,
                 name TEXT NOT NULL,
                 role TEXT NOT NULL,
-                student_class TEXT,
-                medium TEXT DEFAULT 'Malayalam Medium',
+                student_class TEXT NOT NULL,
+                medium TEXT NOT NULL,
                 score INTEGER DEFAULT 0
             );
         """)
@@ -63,27 +63,33 @@ def init_db():
             );
         """)
         
+        # Default Accounts
         c.execute("SELECT username FROM users WHERE username = 'admin'")
         if not c.fetchone():
-            c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0)")
-            c.execute("INSERT OR IGNORE INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
+            c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
             c.execute("INSERT OR IGNORE INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0)")
+            c.execute("INSERT OR IGNORE INTO users VALUES ('student2', 'student123', 'Fathima N', 'student', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
             c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live for 10th, +1, and +2.')")
             
         c.execute("SELECT COUNT(*) FROM questions")
         if c.fetchone()[0] == 0:
             sample_qs = [
+                # Class 10 English Medium
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 1, "What is the common difference of the sequence: 5, 9, 13, 17...?", "2", "3", "4", "5", 2, "Common difference d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 2, "What is the 10th term of the sequence: 3, 7, 11, 15...?", "35", "39", "41", "43", 1, "x_n = 4n - 1. x_10 = 4(10) - 1 = 39."),
-                ("Class 10 (SSLC)", "Mathematics", "English Medium", 3, "What is the angle in a semicircle?", "45°", "60°", "90°", "180°", 2, "Angle subtended by a diameter in a semicircle is 90°."),
-                ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electrical resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms."),
-                ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating: H = I²Rt?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's heating states heat produced is proportional to current squared, resistance, and time."),
-                ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "d = 9 - 5 = 4."),
+                ("Class 10 (SSLC)", "Mathematics", "English Medium", 3, "What is the angle subtended in a semicircle?", "45°", "60°", "90°", "180°", 2, "Angle in a semicircle is always a right angle (90°)."),
+                ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electric resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms (Ω)."),
+                ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating effect: H = I²Rt?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's Law of Heating states heat produced is H = I²Rt."),
+                
+                # Class 10 Malayalam Medium
+                ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "പൊതുവ്യത്യാസം d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 2, "ഒരു അർദ്ധവൃത്തത്തിലെ കോണിന്റെ അളവ് എത്ര?", "45°", "60°", "90°", "180°", 2, "അർദ്ധവൃത്തത്തിലെ കോൺ എപ്പോഴും 90 ഡിഗ്രി (മട്ടക്കോൺ) ആണ്."),
                 ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു."),
                 ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 2, "ആകാശത്തിന്റെ നീലനിറത്തിന് കാരണമായ പ്രകാശ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "വിസരണം", "പ്രകീർണ്ണനം", "അപവർത്തനം", 1, "പ്രകാശ വിസരണം (Scattering of Light) കാരണമാണ് ആകാശം നീലയായി കാണപ്പെടുന്നത്."),
+                
+                # Plus Two English
                 ("Plus Two (+2 Science)", "Physics", "English Medium", 1, "What is the SI unit of electric charge?", "Coulomb", "Volt", "Ampere", "Tesla", 0, "Charge is measured in Coulombs (C)."),
-                ("Plus Two (+2 Science)", "Physics", "English Medium", 2, "What is the capacitance of a conductor if 1 Coulomb charge raises potential by 1 Volt?", "1 Henry", "1 Farad", "1 Tesla", "1 Ohm", 1, "C = Q / V = 1 Farad.")
+                ("Plus Two (+2 Science)", "Physics", "English Medium", 2, "What is the capacitance of a capacitor storing 1 Coulomb at 1 Volt?", "1 Henry", "1 Farad", "1 Tesla", "1 Ohm", 1, "C = Q / V = 1 Farad.")
             ]
             for q in sample_qs:
                 c.execute("INSERT INTO questions (target_class, subject, medium, level, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", q)
@@ -140,7 +146,8 @@ def add_user(req: UserAddReq):
     try:
         with get_db() as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)", (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
+            c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)", 
+                      (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
             conn.commit()
             return {"status": "ok", "message": f"User {req.username} created successfully"}
     except sqlite3.IntegrityError:
@@ -184,6 +191,11 @@ def get_question(target_class: str, subject: str, medium: str, level: int = 1):
         """, (target_class, subject, medium))
         row = c.fetchone()
         if not row:
+            # Fallback to any question in that class & medium
+            c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE target_class = ? AND medium = ? ORDER BY RANDOM() LIMIT 1", (target_class, medium))
+            row = c.fetchone()
+        if not row:
+            # General fallback to medium
             c.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation, level FROM questions WHERE medium = ? ORDER BY RANDOM() LIMIT 1", (medium,))
             row = c.fetchone()
         if row:
@@ -210,38 +222,36 @@ def get_leaderboard():
 @app.post("/api/doubt")
 def ask_doubt(req: DoubtReq):
     if not ai_client:
-        return {"answer": "AI Engine key is not configured. Please set GEMINI_API_KEY in Koyeb environment."}
+        return {"answer": "AI key is not configured in Koyeb environment variables."}
     
     prompt = f"""
-    Role: Senior Kerala SCERT Master Educator at GVHSS KUNIYA.
-    Context:
-    - Class: {req.student_class}
-    - Subject: {req.subject}
-    - Instruction Medium: {req.medium}
+    You are an expert Kerala SCERT teacher for GVHSS KUNIYA.
+    Class: {req.student_class}
+    Subject: {req.subject}
+    Medium: {req.medium}
 
-    Guidelines:
-    1. Respond strictly adhering to the Kerala State SCERT curriculum standards.
-    2. Language: If Medium is 'Malayalam Medium', use elegant, clear Malayalam. If 'English Medium', use crisp English.
-    3. Formatting:
-       - Core Principle / Concept
-       - Formula / Textbook Step-by-Step Resolution
-       - Exam Tip for SSLC/HSE Board Examination
-    
-    Student Query: {req.query}
+    Instructions:
+    1. Base your explanation strictly on the Kerala SCERT syllabus textbook.
+    2. If Medium is 'Malayalam Medium', reply strictly in clear and standard Malayalam.
+    3. If Medium is 'English Medium', reply in concise English.
+    4. Provide:
+       - Concept Overview
+       - Step-by-Step Textbook Solution / Formula
+       - Exam Blueprint Tip
+
+    Question: {req.query}
     """
-    
-    # 3.6-flash ശ്രമിക്കുകയും, ലഭിച്ചില്ലെങ്കിൽ 2.5-flash ഉപയോഗിക്കുകയും ചെയ്യുന്നു
     try:
         res = ai_client.models.generate_content(model=PRIMARY_MODEL, contents=prompt)
         return {"answer": res.text}
     except Exception:
         try:
-            res = ai_client.models.generate_content(model=FALLBACK_MODEL, contents=prompt)
+            res = ai_client.models.generate_content(model=BACKUP_MODEL, contents=prompt)
             return {"answer": res.text}
         except Exception as e:
             return {"answer": f"Tutor engine error: {str(e)}"}
 
-# ----------------- MODERN FRONTEND INTERFACE -----------------
+# ----------------- FRONTEND UI -----------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -252,7 +262,7 @@ def index():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GVHSS KUNIYA - Advanced KBC Learning Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Gayathri:wght@700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070B14; color: #F8FAFC; }
         .kbc-arena { background: radial-gradient(circle at center, #111D4A 0%, #060A17 100%); border: 2px solid #E5A93B; box-shadow: 0 0 35px rgba(229, 169, 59, 0.25); }
@@ -263,7 +273,7 @@ def index():
 </head>
 <body class="min-h-screen p-3 md:p-6 flex flex-col items-center">
 
-    <!-- LOGIN SCREEN -->
+    <!-- LOGIN PANEL -->
     <div id="auth-panel" class="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-3xl mt-10 shadow-2xl">
         <div class="text-center mb-6">
             <span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-bold uppercase tracking-wider">Official Portal</span>
@@ -284,9 +294,9 @@ def index():
         </form>
     </div>
 
-    <!-- MAIN PLATFORM INTERFACE -->
+    <!-- MAIN DASHBOARD -->
     <div id="main-panel" class="w-full max-w-6xl hidden flex-col space-y-5">
-        <!-- Top Bar -->
+        <!-- Header -->
         <header class="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-wrap justify-between items-center shadow-lg gap-4">
             <div>
                 <h1 class="text-2xl font-black text-amber-400">GVHSS KUNIYA</h1>
@@ -337,10 +347,9 @@ def index():
             <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Admin Control</button>
         </div>
 
-        <!-- VIEW 1: AUTHENTIC KBC ARENA -->
+        <!-- VIEW 1: KBC ARENA -->
         <div id="view-kbc" class="grid grid-cols-1 lg:grid-cols-4 gap-5">
             <div class="lg:col-span-3 space-y-4">
-                <!-- Status & Lifelines -->
                 <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-3 rounded-2xl">
                     <div class="flex items-center space-x-2">
                         <span class="text-xs font-bold text-slate-400">⏱ TIMER:</span>
@@ -352,13 +361,11 @@ def index():
                     </div>
                 </div>
 
-                <!-- Arena Question Box -->
                 <div class="kbc-arena p-6 md:p-8 rounded-3xl text-center relative overflow-hidden">
                     <span id="kbc-step-tag" class="text-xs font-black text-amber-400 uppercase tracking-widest bg-amber-500/20 px-3 py-1 rounded-full border border-amber-500/40">QUESTION 1 • ₹1,000 PTS</span>
                     <h2 id="q-content" class="text-lg md:text-2xl font-bold text-white mt-4 leading-relaxed">Loading challenge...</h2>
                 </div>
 
-                <!-- 4 KBC Options -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <button onclick="verifyAnswer(0)" id="op-0" class="kbc-option p-4 rounded-2xl text-left font-bold text-white text-sm md:text-base"></button>
                     <button onclick="verifyAnswer(1)" id="op-1" class="kbc-option p-4 rounded-2xl text-left font-bold text-white text-sm md:text-base"></button>
@@ -366,12 +373,11 @@ def index():
                     <button onclick="verifyAnswer(3)" id="op-3" class="kbc-option p-4 rounded-2xl text-left font-bold text-white text-sm md:text-base"></button>
                 </div>
 
-                <!-- Result Message & Next Button -->
                 <div id="ans-feedback" class="hidden p-4 rounded-2xl text-sm font-semibold"></div>
                 <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question (അടുത്ത ചോദ്യം)</button>
             </div>
 
-            <!-- KBC Money/Points Ladder -->
+            <!-- Ladder -->
             <div class="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-1.5 text-xs font-bold">
                 <div class="text-slate-400 uppercase tracking-wider text-[11px] mb-3 text-center">Score Progress Ladder</div>
                 <div id="ladder-10" class="flex justify-between p-2 rounded-lg bg-slate-800/40 text-amber-300"><span>10. Jackpot</span><span>1,00,00,000 Pts</span></div>
@@ -390,8 +396,8 @@ def index():
         <!-- VIEW 2: AI SCERT TUTOR -->
         <div id="view-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4">
             <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT Deep Learning Tutor</h3>
-            <p class="text-xs text-slate-400">Pedagogical explanations strictly mapped to Board exam blueprints.</p>
-            <textarea id="tutor-in" placeholder="Ask your textbook doubt (e.g. Explain Lenz's Law with induction applications)..." class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
+            <p class="text-xs text-slate-400">Explanations strictly based on your enrolled syllabus blueprint.</p>
+            <textarea id="tutor-in" placeholder="Ask your textbook doubt..." class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
             <button onclick="requestDoubtSolution()" class="bg-amber-500 hover:bg-amber-400 text-black font-black px-6 py-3 rounded-xl shadow-md">Solve Textbook Doubt</button>
             <div id="tutor-out" class="text-slate-200 text-sm leading-relaxed whitespace-pre-line bg-slate-800/80 p-5 rounded-2xl border border-slate-700 hidden"></div>
         </div>
@@ -401,47 +407,48 @@ def index():
             <iframe id="jitsi-stage" src="" class="w-full h-[620px] rounded-3xl border border-slate-800" allow="camera; microphone; fullscreen; display-capture"></iframe>
         </div>
 
-        <!-- VIEW 4: ADMIN CONSOLE -->
+        <!-- VIEW 4: ADMIN CONSOLE (ONLY FOR ADMIN) -->
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
                 <h3 class="text-xl font-black text-amber-400">Administrative Control Hub</h3>
-                <p class="text-xs text-slate-400 mt-1">Add students, teachers, or administrators. Data is fully persistent.</p>
+                <p class="text-xs text-slate-400 mt-1">Enroll students with specific Class and Medium. Data is stored permanently.</p>
             </div>
 
-            <!-- Add User Form -->
+            <!-- Add User Form with Class & Medium Selection -->
             <form onsubmit="createUser(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input id="new-u" type="text" placeholder="Username" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                <input id="new-u" type="text" placeholder="Username / Student ID" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
                 <input id="new-p" type="password" placeholder="Password" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
-                <input id="new-name" type="text" placeholder="Full Name" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                <input id="new-name" type="text" placeholder="Full Student/Staff Name" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                
                 <select id="new-role" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
                     <option value="student">Student</option>
                     <option value="teacher">Teacher</option>
                     <option value="admin">Administrator</option>
                 </select>
+                
                 <select id="new-cls" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                    <option value="None">None (for Admin/General)</option>
                     <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
                     <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
                     <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
                     <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
                     <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
                 </select>
+                
                 <select id="new-med" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                    <option value="Malayalam Medium">Malayalam Medium</option>
                     <option value="English Medium">English Medium</option>
+                    <option value="Malayalam Medium">Malayalam Medium</option>
                 </select>
-                <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Register Account</button>
+                
+                <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Enroll & Register Account</button>
             </form>
 
-            <!-- User Directory -->
             <div>
-                <h4 class="font-bold text-sm text-slate-300 mb-3">Enrolled Accounts</h4>
+                <h4 class="font-bold text-sm text-slate-300 mb-3">Enrolled Student & Staff Directory</h4>
                 <div id="user-table" class="space-y-2 max-h-72 overflow-y-auto pr-2"></div>
             </div>
 
-            <!-- Broadcast Broadcaster -->
             <div class="border-t border-slate-800 pt-4">
-                <h4 class="font-bold text-sm text-slate-300 mb-2">Publish School Notice</h4>
+                <h4 class="font-bold text-sm text-slate-300 mb-2">Publish Notice</h4>
                 <div class="flex gap-2">
                     <input id="new-notice" type="text" placeholder="Type school announcement..." class="flex-1 bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-xl text-white text-sm">
                     <button onclick="postNotice()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-5 py-2.5 rounded-xl text-sm">Broadcast</button>
@@ -484,7 +491,7 @@ def index():
         function syncClass() {
             const c = document.getElementById('sel-class').value;
             const m = document.getElementById('sel-med').value;
-            const list = subjectMatrix[c][m] || ["General"];
+            const list = (subjectMatrix[c] && subjectMatrix[c][m]) ? subjectMatrix[c][m] : ["General"];
             const s = document.getElementById('sel-subj');
             s.innerHTML = '';
             list.forEach(i => {
@@ -510,10 +517,23 @@ def index():
                     document.getElementById('main-panel').classList.add('flex');
                     document.getElementById('usr-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
                     document.getElementById('score-tag').innerText = `🏆 ${me.score.toLocaleString()} Pts`;
-                    if(me.role === 'admin') document.getElementById('tb-admin').classList.remove('hidden');
+                    
+                    // IF STUDENT: LOCK TO THEIR ASSIGNED CLASS & MEDIUM
+                    if(me.role === 'student') {
+                        document.getElementById('sel-class').value = me.student_class;
+                        document.getElementById('sel-med').value = me.medium;
+                        document.getElementById('sel-class').disabled = true;
+                        document.getElementById('sel-med').disabled = true;
+                        document.getElementById('tb-admin').classList.add('hidden');
+                    } else if(me.role === 'admin') {
+                        document.getElementById('sel-class').disabled = false;
+                        document.getElementById('sel-med').disabled = false;
+                        document.getElementById('tb-admin').classList.remove('hidden');
+                        fetchUserDirectory();
+                    }
+                    
                     syncClass();
                     fetchNotice();
-                    if(me.role === 'admin') fetchUserDirectory();
                 } else {
                     err.innerText = d.detail; err.classList.remove('hidden');
                 }
@@ -578,7 +598,7 @@ def index():
             const m = document.getElementById('sel-med').value;
             const s = document.getElementById('sel-subj').value;
             const prize = prizeLadder[currentStep - 1] || 1000;
-            document.getElementById('kbc-step-tag').innerText = `QUESTION ${currentStep} • ₹${prize.toLocaleString()} PTS`;
+            document.getElementById('kbc-step-tag').innerText = `QUESTION ${currentStep} • ₹${prize.toLocaleString()} PTS (${m})`;
 
             const r = await fetch(`/api/question?target_class=${encodeURIComponent(c)}&subject=${encodeURIComponent(s)}&medium=${encodeURIComponent(m)}&level=${currentStep}`);
             const d = await r.json();
@@ -590,6 +610,8 @@ def index():
                 document.getElementById('op-2').innerText = `[C]  ${activeQ.opt_c}`;
                 document.getElementById('op-3').innerText = `[D]  ${activeQ.opt_d}`;
                 startClock();
+            } else {
+                document.getElementById('q-content').innerText = "No questions available for this selection.";
             }
         }
 
@@ -688,7 +710,7 @@ def index():
             d.users.forEach(u => {
                 box.innerHTML += `
                     <div class="flex justify-between items-center bg-slate-800/60 p-2.5 rounded-xl text-xs">
-                        <span><strong>${u.username}</strong> (${u.name}) - <span class="text-amber-400 font-bold">${u.role}</span></span>
+                        <span><strong>${u.username}</strong> (${u.name}) - <span class="text-amber-400 font-bold">${u.student_class} (${u.medium})</span> [${u.role}]</span>
                         <div class="flex items-center space-x-2">
                             <span>🏆 ${u.score}</span>
                             ${u.username !== 'admin' ? `<button onclick="removeUser('${u.username}')" class="text-rose-400 hover:text-rose-300 font-bold">Delete</button>` : ''}
