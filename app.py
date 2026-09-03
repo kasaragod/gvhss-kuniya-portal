@@ -1,703 +1,496 @@
-import streamlit as st
-from google import genai
-from PIL import Image
-import sqlite3
-import random
-import json
 import os
+import json
+import random
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from google import genai
 
-st.set_page_config(
-    page_title="GVHSS KUNIYA - Smart Learning Portal",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+app = FastAPI(title="GVHSS KUNIYA Smart Campus")
 
-# ----------------- GEMINI MODEL CONFIGURATION -----------------
+# ----------------- CONFIGURATION & POSTGRESQL -----------------
+DATABASE_URL = os.environ.get("DATABASE_URL") # Neon.tech / Supabase PostgreSQL URL
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL = "gemini-2.0-flash"
 
-# ----------------- KBC THEME STYLING -----------------
-st.markdown("""
-<style>
-    .kbc-question-card {
-        background: linear-gradient(135deg, #0b132b 0%, #1c2541 50%, #0b132b 100%);
-        border: 2px solid #e5a93b;
-        border-radius: 16px;
-        padding: 24px;
-        text-align: center;
-        box-shadow: 0 0 20px rgba(229, 169, 59, 0.35);
-        margin-bottom: 25px;
-    }
-    .kbc-question-text {
-        color: #ffffff !important;
-        font-size: 1.25rem !important;
-        font-weight: 700;
-        line-height: 1.6;
-        margin: 0;
-    }
-    .kbc-meta-tag {
-        display: inline-block;
-        background-color: rgba(229, 169, 59, 0.2);
-        color: #fbd46d;
-        border: 1px solid #e5a93b;
-        border-radius: 20px;
-        padding: 4px 14px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin-bottom: 12px;
-    }
-    div[data-testid="column"] button {
-        background: linear-gradient(180deg, #162447 0%, #1f4068 100%) !important;
-        color: #ffffff !important;
-        border: 1.5px solid #d4af37 !important;
-        border-radius: 12px !important;
-        padding: 14px 16px !important;
-        font-size: 1.05rem !important;
-        font-weight: 600 !important;
-        transition: all 0.25s ease-in-out !important;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3) !important;
-    }
-    div[data-testid="column"] button:hover {
-        background: linear-gradient(180deg, #d4af37 0%, #aa820a 100%) !important;
-        color: #0b132b !important;
-        border-color: #ffffff !important;
-        transform: scale(1.02);
-        box-shadow: 0 0 15px rgba(229, 169, 59, 0.7) !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# ----------------- KERALA SCERT SYLLABUS & CHAPTERS -----------------
-KERALA_CLASSES = [
-    "Class 8", "Class 9", "Class 10 (SSLC)",
-    "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus One (+1 Humanities)",
-    "Plus Two (+2 Science)", "Plus Two (+2 Commerce)", "Plus Two (+2 Humanities)"
-]
-
-SCERT_CHAPTERS = {
-    ("Class 10 (SSLC)", "Mathematics"): [
-        "All Chapters (എല്ലാ പാഠങ്ങളും)",
-        "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)",
-        "2. Circles (വൃത്തങ്ങൾ)",
-        "3. Mathematics of Chance (സാധ്യതകളുടെ ഗണിതം)",
-        "4. Second Degree Equations (രണ്ടാംകൃതി സമവാക്യങ്ങൾ)",
-        "5. Trigonometry (ത്രികോണമിതി)",
-        "6. Coordinates (സൂചകസംഖ്യകൾ)",
-        "7. Tangents (തൊടുവരകൾ)",
-        "8. Solids (ഘനരൂപങ്ങൾ)",
-        "9. Geometry and Algebra (ജ്യാമിതിയും ബീജഗണിതവും)",
-        "10. Polynomials (ബഹുപദങ്ങൾ)",
-        "11. Statistics (സ്ഥിതിവിവരക്കണക്ക്)"
-    ],
-    ("Class 10 (SSLC)", "Physics"): [
-        "All Chapters (എല്ലാ പാഠങ്ങളും)",
-        "1. Effects of Electric Current (വൈദ്യുതി പ്രവാഹത്തിന്റെ ഫലങ്ങൾ)",
-        "2. Magnetic Effect of Electric Current (വൈദ്യുതപ്രവാഹത്തിന്റെ കാന്തികഫലം)",
-        "3. Electromagnetic Induction (വൈദ്യുതകാന്തിക പ്രേരണ)",
-        "4. Reflection of Light (പ്രകാശത്തിന്റെ പ്രതിപതനം)",
-        "5. Refraction of Light (പ്രകാശത്തിന്റെ അപവർത്തനം)",
-        "6. Vision and the World of Colours (കാഴ്ചയും വർണ്ണങ്ങളുടെ ലോകവും)",
-        "7. Energy Management (ഊർജ്ജപരിപാലനം)"
-    ],
-    ("Class 10 (SSLC)", "Chemistry"): [
-        "All Chapters (എല്ലാ പാഠങ്ങളും)",
-        "1. Periodic Table and Electronic Configuration (പീരിയോഡിക് ടേബിളും ഇലക്ട്രോൺ വിന്യാസവും)",
-        "2. Gas Laws and Mole Concept (വാതകനിയമങ്ങളും മോൾ സങ്കല്പനവും)",
-        "3. Reactivity Series and Electrochemistry (പ്രവർത്തനതീവ്രതാ ശ്രേണിയും വൈദ്യുതരസതന്ത്രവും)",
-        "4. Production of Metals (ലോഹനിർമ്മാണം)",
-        "5. Compounds of Non-Metals (അലോഹസംയുക്തങ്ങൾ)",
-        "6. Nomenclature of Organic Compounds (ഓർഗാനിക് സംയുക്തങ്ങളുടെ നാമകരണം)",
-        "7. Chemical Reactions of Organic Compounds (ഓർഗാനിക് രാസപ്രവർത്തനങ്ങൾ)"
-    ],
-    ("Class 10 (SSLC)", "Biology"): [
-        "All Chapters (എല്ലാ പാഠങ്ങളും)",
-        "1. Sensations and Responses (അറിയാനും പ്രതികരിക്കാനും)",
-        "2. Windows of Knowledge (അറിവിന്റെ വാതായനങ്ങൾ)",
-        "3. Chemical Messages for Homeostasis (സമസ്ഥിതിക്കായുള്ള രാസസന്ദേശങ്ങൾ)",
-        "4. Keeping Diseases Away (രോഗങ്ങളെ അകറ്റിനിർത്താം)",
-        "5. Soldiers of Defense (പ്രതിരോധത്തിന്റെ കാവലാളുകൾ)",
-        "6. Unravelling Genetic Mysteries (ജനിതക രഹസ്യങ്ങൾ തേടി)",
-        "7. Genetics for Future (നാളെയുടെ ജനിതകം)",
-        "8. The Paths Traversed by Life (ജീവന്റെ നാൾവഴികൾ)"
-    ]
-}
-
-def get_subjects(cls_name, medium):
-    is_mal = "Malayalam" in medium
-    if cls_name in ["Class 8", "Class 9", "Class 10 (SSLC)"]:
-        return [
-            "ഗണിതം (Mathematics)", "ഭൗതികശാസ്ത്രം (Physics)", "രസതന്ത്രം (Chemistry)",
-            "ജീവശാസ്ത്രം (Biology)", "സാമൂഹ്യശാസ്ത്രം I", "സാമൂഹ്യശാസ്ത്രം II", "English", "മലയാളം"
-        ] if is_mal else [
-            "Mathematics", "Physics", "Chemistry", "Biology", "Social Science I", "Social Science II", "English", "Malayalam"
-        ]
-    elif "Science" in cls_name:
-        return [
-            "ഭൗതികശാസ്ത്രം (Physics)", "രസതന്ത്രം (Chemistry)", "ഗണിതം (Mathematics)",
-            "ജീവശാസ്ത്രം (Biology)", "Computer Science", "English"
-        ] if is_mal else [
-            "Physics", "Chemistry", "Mathematics", "Biology", "Computer Science", "English"
-        ]
-    elif "Commerce" in cls_name:
-        return [
-            "അക്കൗണ്ടൻസി (Accountancy)", "Business Studies", "സാമ്പത്തികശാസ്ത്രം (Economics)", "English"
-        ] if is_mal else [
-            "Accountancy", "Business Studies", "Economics", "English"
-        ]
-    return [
-        "ചരിത്രം (History)", "സാമ്പത്തികശാസ്ത്രം (Economics)", "Political Science", "Sociology", "English"
-    ] if is_mal else [
-        "History", "Economics", "Political Science", "Sociology", "English"
-    ]
-
-def get_chapters_for_selection(cls_name, subj_name):
-    norm_subj = "Mathematics" if "ഗണിതം" in subj_name or "Math" in subj_name else \
-                "Physics" if "ഭൗതിക" in subj_name or "Physic" in subj_name else \
-                "Chemistry" if "രസതന്ത്രം" in subj_name or "Chemi" in subj_name else \
-                "Biology" if "ജീവശാസ്ത്രം" in subj_name or "Bio" in subj_name else subj_name
-    
-    key = (cls_name, norm_subj)
-    if key in SCERT_CHAPTERS:
-        return SCERT_CHAPTERS[key]
-    return ["All Chapters (എല്ലാ പാഠങ്ങളും)", "Unit 1", "Unit 2", "Unit 3", "Unit 4"]
-
-# ----------------- DATABASE MANAGEMENT (CONCURRENCY SAFE) -----------------
-DB_FILE = "kuniya_portal.db"
-
-def get_connection():
-    # 30 സെക്കൻഡ് timeout കൊടുക്കുന്നതിലൂടെ database lock എറർ ഒഴിവാകുന്നു
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL;")  # Read & Write ഒരേസമയം സാധ്യമാക്കുന്നു
-    return conn
+def get_db():
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL environment variable is missing.")
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 def init_db():
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password TEXT NOT NULL,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                student_class TEXT,
-                medium TEXT DEFAULT 'Malayalam Medium',
-                score INTEGER DEFAULT 0
-            )
-        ''')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS notices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                notice_text TEXT NOT NULL,
-                posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS kbc_questions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                target_class TEXT NOT NULL,
-                subject TEXT NOT NULL,
-                chapter TEXT NOT NULL DEFAULT 'All Chapters',
-                medium TEXT NOT NULL,
-                question TEXT NOT NULL,
-                opt_a TEXT NOT NULL,
-                opt_b TEXT NOT NULL,
-                opt_c TEXT NOT NULL,
-                opt_d TEXT NOT NULL,
-                correct_idx INTEGER NOT NULL,
-                explanation TEXT NOT NULL
-            )
-        ''')
-        
-        c.execute('SELECT username FROM users WHERE username = ?', ('admin',))
-        if not c.fetchone():
-            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                      ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0))
-            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                      ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium', 0))
-            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                      ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0))
-            c.execute('INSERT INTO notices (notice_text) VALUES (?)', 
-                      ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.',))
-
-init_db()
-
-def get_user(username):
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ?', (username,))
-        row = c.fetchone()
-        if row:
-            return {"username": row[0], "password": row[1], "name": row[2], "role": row[3], "class": row[4], "medium": row[5], "score": row[6] or 0}
-    return None
-
-def update_user_score(username, points):
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('UPDATE users SET score = score + ? WHERE username = ?', (points, username))
-
-def get_top_students():
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('SELECT name, student_class, score FROM users WHERE role = "student" ORDER BY score DESC LIMIT 5')
-        return c.fetchall()
-
-def get_all_users():
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('SELECT username, name, role, student_class, score FROM users ORDER BY role, name')
-        return c.fetchall()
-
-def add_user(username, password, name, role, student_class, medium):
-    try:
-        with get_connection() as conn:
-            c = conn.cursor()
-            c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', (username, password, name, role, student_class, medium, 0))
-        return True, f"User '{username}' created successfully!"
-    except sqlite3.IntegrityError:
-        return False, "This Username already exists. Please choose a different one."
-    except Exception as e:
-        return False, f"Error: {e}"
-
-def delete_user(username):
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('DELETE FROM users WHERE username = ?', (username,))
-
-def set_latest_notice(text):
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('INSERT INTO notices (notice_text) VALUES (?)', (text,))
-
-def get_latest_notice():
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute('SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1')
-        row = c.fetchone()
-        return row[0] if row else "Welcome to GVHSS KUNIYA Digital Campus."
-
-# ----------------- KBC ENGINE -----------------
-def fetch_kbc_question(target_class, subject, chapter, medium, exclude_ids=[]):
-    with get_connection() as conn:
-        c = conn.cursor()
-        placeholders = ','.join('?' for _ in exclude_ids) if exclude_ids else '0'
-        
-        if "All Chapters" not in chapter:
-            c.execute(f'''
-                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-                FROM kbc_questions 
-                WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ? AND id NOT IN ({placeholders})
-                ORDER BY RANDOM() LIMIT 1
-            ''', [target_class, subject, chapter, medium] + list(exclude_ids))
-            row = c.fetchone()
-            if row:
-                return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
-        
-        c.execute(f'''
-            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-            FROM kbc_questions 
-            WHERE target_class = ? AND subject = ? AND medium = ? AND id NOT IN ({placeholders})
-            ORDER BY RANDOM() LIMIT 1
-        ''', [target_class, subject, medium] + list(exclude_ids))
-        row = c.fetchone()
-        
-        if not row:
-            c.execute(f'''
-                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-                FROM kbc_questions 
-                WHERE medium = ? AND id NOT IN ({placeholders})
-                ORDER BY RANDOM() LIMIT 1
-            ''', [medium] + list(exclude_ids))
-            row = c.fetchone()
+    if not DATABASE_URL:
+        return
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            # Users table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username VARCHAR(50) PRIMARY KEY,
+                    password VARCHAR(100) NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    role VARCHAR(20) NOT NULL,
+                    student_class VARCHAR(50),
+                    medium VARCHAR(30) DEFAULT 'Malayalam Medium',
+                    score INT DEFAULT 0
+                );
+            """)
+            # Notices table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notices (
+                    id SERIAL PRIMARY KEY,
+                    notice_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            # KBC Questions table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kbc_questions (
+                    id SERIAL PRIMARY KEY,
+                    target_class VARCHAR(50) NOT NULL,
+                    subject VARCHAR(50) NOT NULL,
+                    chapter VARCHAR(100) NOT NULL,
+                    medium VARCHAR(30) NOT NULL,
+                    question TEXT NOT NULL,
+                    opt_a TEXT NOT NULL,
+                    opt_b TEXT NOT NULL,
+                    opt_c TEXT NOT NULL,
+                    opt_d TEXT NOT NULL,
+                    correct_idx INT NOT NULL,
+                    explanation TEXT NOT NULL
+                );
+            """)
+            # Default Accounts
+            cur.execute("SELECT username FROM users WHERE username = 'admin';")
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO users (username, password, name, role, student_class, medium, score)
+                    VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0),
+                           ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0);
+                """)
+                cur.execute("""
+                    INSERT INTO notices (notice_text)
+                    VALUES ('Welcome to GVHSS KUNIYA High-Speed Digital Campus (SSLC, +1, +2).');
+                """)
             
-        if not row:
-            c.execute('''
-                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-                FROM kbc_questions 
-                WHERE medium = ? 
-                ORDER BY RANDOM() LIMIT 1
-            ''', (medium,))
-            row = c.fetchone()
-            
-        if row:
-            return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
-    return None
-
-def count_kbc_questions(target_class, subject, chapter, medium):
-    with get_connection() as conn:
-        c = conn.cursor()
-        if "All Chapters" not in chapter:
-            c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ?', (target_class, subject, chapter, medium))
-        else:
-            c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND medium = ?', (target_class, subject, medium))
-        return c.fetchone()[0]
-
-def insert_batch_kbc_questions(target_class, subject, chapter, medium, q_list):
-    with get_connection() as conn:
-        c = conn.cursor()
-        for q in q_list:
-            try:
-                c.execute('''
+            # Default Seed Questions
+            cur.execute("SELECT COUNT(*) as cnt FROM kbc_questions;")
+            if cur.fetchone()['cnt'] == 0:
+                cur.execute("""
                     INSERT INTO kbc_questions (target_class, subject, chapter, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (target_class, subject, chapter, medium, q["q"], q["options"][0], q["options"][1], q["options"][2], q["options"][3], q["answer_idx"], q["exp"]))
-            except Exception:
-                continue
+                    VALUES 
+                    ('Class 10 (SSLC)', 'Mathematics', '1. Arithmetic Sequences', 'English Medium', 
+                     'What is the common difference of the AP: 4, 7, 10, 13...?', '2', '3', '4', '5', 1, 'Common difference d = 7 - 4 = 3.'),
+                    ('Class 10 (SSLC)', 'Mathematics', '1. Arithmetic Sequences', 'Malayalam Medium', 
+                     '4, 7, 10, 13... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്രയാണ്?', '2', '3', '4', '5', 1, 'പൊതുവ്യത്യാസം d = 7 - 4 = 3 ആണ്.'),
+                    ('Class 10 (SSLC)', 'Physics', '1. Effects of Electric Current', 'English Medium', 
+                     'Which law states that H = I^2 * R * t?', 'Ohm Law', 'Joule Law', 'Faraday Law', 'Lenz Law', 1, 'Joules Law of Heating governs heating effect.'),
+                    ('Plus Two (+2 Science)', 'Physics', '1. Electric Charges and Fields', 'English Medium', 
+                     'What is the SI unit of electric charge?', 'Ampere', 'Coulomb', 'Volt', 'Ohm', 1, 'The SI unit of electric charge is the Coulomb (C).');
+                """)
+        conn.commit()
 
-def generate_ai_kbc_batch(client, target_class, subject, chapter, medium, count=10):
-    lang_inst = "Generate questions and options strictly in standard Malayalam based on SCERT Kerala textbooks." if "Malayalam" in medium else "Generate questions and options in English based on SCERT Kerala textbooks."
+try:
+    init_db()
+except Exception as e:
+    print(f"Database init warning: {e}")
+
+# ----------------- API SCHEMAS -----------------
+class LoginReq(BaseModel):
+    username: str
+    password: str
+
+class ScoreReq(BaseModel):
+    username: str
+    points: int
+
+class DoubtReq(BaseModel):
+    student_class: str
+    subject: str
+    medium: str
+    query: str
+
+# ----------------- API ENDPOINTS -----------------
+@app.post("/api/login")
+def login(req: LoginReq):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username, name, role, student_class, medium, score FROM users WHERE username=%s AND password=%s", (req.username.strip().lower(), req.password.strip()))
+            user = cur.fetchone()
+            if user:
+                return {"status": "ok", "user": user}
+            raise HTTPException(status_code=401, detail="Invalid Username or Password")
+
+@app.get("/api/notice")
+def get_notice():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1;")
+            row = cur.fetchone()
+            return {"notice": row["notice_text"] if row else "Welcome to GVHSS KUNIYA."}
+
+@app.get("/api/question")
+def get_question(target_class: str, subject: str, medium: str):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+                FROM kbc_questions 
+                WHERE target_class = %s AND subject = %s AND medium = %s 
+                ORDER BY RANDOM() LIMIT 1;
+            """, (target_class, subject, medium))
+            q = cur.fetchone()
+            if not q:
+                # Fallback to any question in medium
+                cur.execute("SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation FROM kbc_questions WHERE medium = %s ORDER BY RANDOM() LIMIT 1;", (medium,))
+                q = cur.fetchone()
+            return {"question": q}
+
+@app.post("/api/score")
+def update_score(req: ScoreReq):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET score = score + %s WHERE username = %s RETURNING score;", (req.points, req.username))
+            updated = cur.fetchone()
+        conn.commit()
+        return {"status": "ok", "new_score": updated["score"] if updated else 0}
+
+@app.get("/api/leaderboard")
+def leaderboard():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name, student_class, score FROM users WHERE role = 'student' ORDER BY score DESC LIMIT 5;")
+            return {"leaders": cur.fetchall()}
+
+@app.post("/api/doubt")
+def solve_doubt(req: DoubtReq):
+    if not ai_client:
+        return {"answer": "AI service is currently offline. Please ensure GEMINI_API_KEY is configured."}
     prompt = f"""
-    Create {count} multiple-choice quiz questions based strictly on the official Kerala SCERT curriculum for GVHSS KUNIYA.
-    Class: {target_class}
-    Subject: {subject}
-    Textbook Chapter / Unit: {chapter}
-    Medium: {medium}
-    {lang_inst}
+    You are an expert Kerala SCERT teacher for GVHSS KUNIYA.
+    Class: {req.student_class}
+    Subject: {req.subject}
+    Medium: {req.medium}
     
-    Return ONLY a valid JSON array of objects without markdown formatting:
-    [
-      {{
-        "q": "Question text?",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
-        "answer_idx": 0,
-        "exp": "Textbook reference and step-by-step reason"
-      }}
-    ]
+    Explain step-by-step strictly according to Kerala SCERT syllabus:
+    {req.query}
     """
     try:
-        res = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={"response_mime_type": "application/json"}
-        )
-        return json.loads(res.text)
-    except Exception:
-        return []
+        res = ai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        return {"answer": res.text}
+    except Exception as e:
+        return {"answer": f"Error consulting tutor: {e}"}
 
-# ----------------- SESSION STATE -----------------
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-    st.session_state["username"] = None
-    st.session_state["role"] = None
-    st.session_state["display_name"] = None
-    st.session_state["student_class"] = None
-    st.session_state["medium"] = "Malayalam Medium"
+# ----------------- ULTRA-FAST HTML FRONTEND -----------------
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GVHSS KUNIYA - Smart Learning Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0B0F19; color: #F8FAFC; }
+        .kbc-card { background: radial-gradient(circle at center, #162447 0%, #0b132b 100%); border: 2px solid #D4AF37; box-shadow: 0 0 25px rgba(212, 175, 55, 0.25); }
+        .kbc-btn { background: linear-gradient(180deg, #1f4068 0%, #162447 100%); border: 1.5px solid #d4af37; transition: all 0.2s; }
+        .kbc-btn:hover:not(:disabled) { background: linear-gradient(180deg, #d4af37 0%, #aa820a 100%); color: #0b132b; transform: translateY(-2px); }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-6 flex flex-col items-center">
 
-if "seen_question_ids" not in st.session_state:
-    st.session_state["seen_question_ids"] = set()
-if "kbc_q" not in st.session_state:
-    st.session_state["kbc_q"] = None
-if "kbc_streak" not in st.session_state:
-    st.session_state["kbc_streak"] = 0
-if "kbc_answered" not in st.session_state:
-    st.session_state["kbc_answered"] = False
-if "kbc_fifty_used" not in st.session_state:
-    st.session_state["kbc_fifty_used"] = False
-if "kbc_disabled_options" not in st.session_state:
-    st.session_state["kbc_disabled_options"] = []
-if "kbc_selected_idx" not in st.session_state:
-    st.session_state["kbc_selected_idx"] = None
-
-# ----------------- AUTH SCREEN -----------------
-def login_screen():
-    _, col, _ = st.columns([1, 1.6, 1])
-    with col:
-        st.header("🎓 GVHSS KUNIYA")
-        st.caption("Govt Vocational Higher Secondary School, Kuniya • Kasaragod")
-        st.write("---")
-        with st.form("login_form"):
-            st.subheader("Portal Sign In")
-            uid = st.text_input("User ID", placeholder="admin / student1").strip().lower()
-            pwd = st.text_input("Password", type="password", placeholder="••••••••").strip()
-            submit = st.form_submit_button("Sign In", use_container_width=True)
-            if submit:
-                user = get_user(uid)
-                if user and user["password"] == pwd:
-                    st.session_state["authenticated"] = True
-                    st.session_state["username"] = user["username"]
-                    st.session_state["role"] = user["role"]
-                    st.session_state["display_name"] = user["name"]
-                    st.session_state["student_class"] = user["class"]
-                    st.session_state["medium"] = user["medium"]
-                    st.rerun()
-                else:
-                    st.error("Invalid username or password.")
-
-if not st.session_state["authenticated"]:
-    login_screen()
-    st.stop()
-
-# ----------------- MAIN DASHBOARD -----------------
-current_user = get_user(st.session_state["username"])
-live_score = current_user["score"] if current_user else 0
-
-c_head1, c_head2 = st.columns([3, 1])
-with c_head1:
-    st.title("🎓 GVHSS KUNIYA")
-    st.caption("Govt Vocational Higher Secondary School, Kuniya • Kasaragod, Kerala")
-with c_head2:
-    st.info(f"**{st.session_state['display_name']}**\n\nRole: `{st.session_state['role'].upper()}` | 🏆 **{live_score:,} Pts**")
-
-# Notice
-notice = get_latest_notice()
-st.warning(f"📢 **School Notice:** {notice}")
-st.write("---")
-
-# Sidebar
-st.sidebar.title("My Profile")
-st.sidebar.write(f"**Name:** {st.session_state['display_name']}")
-st.sidebar.write(f"**Role:** {st.session_state['role'].capitalize()}")
-st.sidebar.write(f"**Total Score:** 🏆 {live_score:,} Pts")
-
-# Medium Selector
-medium_idx = 0 if st.session_state["medium"] == "Malayalam Medium" else 1
-selected_medium = st.sidebar.radio(
-    "Instruction Medium", 
-    ["Malayalam Medium", "English Medium"], 
-    index=medium_idx
-)
-if selected_medium != st.session_state["medium"]:
-    st.session_state["medium"] = selected_medium
-    st.session_state["kbc_q"] = None
-    st.session_state["seen_question_ids"] = set()
-    st.rerun()
-
-if st.sidebar.button("Logout", use_container_width=True):
-    st.session_state["authenticated"] = False
-    st.session_state["username"] = None
-    st.rerun()
-
-# Class, Subject & Chapter Selection
-col_sel1, col_sel2, col_sel3 = st.columns([1.2, 1.2, 1.6])
-with col_sel1:
-    if st.session_state["role"] in ["admin", "teacher"]:
-        selected_class = st.selectbox("Academic Class", KERALA_CLASSES)
-    else:
-        selected_class = st.session_state.get("student_class", "Class 10 (SSLC)")
-        st.write(f"Enrolled Class: **{selected_class}**")
-with col_sel2:
-    available_subjects = get_subjects(selected_class, selected_medium)
-    subject = st.selectbox("Subject", available_subjects)
-
-with col_sel3:
-    chapter_list = get_chapters_for_selection(selected_class, subject)
-    selected_chapter = st.selectbox("Textbook Chapter / Unit", chapter_list)
-
-# AI Setup
-api_key = os.environ.get("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key) if api_key else None
-
-# ----------------- ADMIN CONSOLE -----------------
-if st.session_state["role"] == "admin":
-    with st.expander("⚙️ Admin Management Console", expanded=False):
-        adm1, adm2, adm3 = st.tabs(["➕ Add User / Admin", "👥 Registered Users & Scores", "📢 Update Notice"])
-        with adm1:
-            with st.form("add_user_form"):
-                c_u1, c_u2 = st.columns(2)
-                with c_u1:
-                    new_uid = st.text_input("User ID", placeholder="e.g. teacher_maths").strip().lower()
-                    new_pwd = st.text_input("Password", type="password", placeholder="Password").strip()
-                with c_u2:
-                    new_name = st.text_input("Full Name", placeholder="e.g. Suresh Kumar").strip()
-                    new_role = st.selectbox("Role Permission", ["student", "teacher", "admin"])
-                
-                c_u3, c_u4 = st.columns(2)
-                with c_u3:
-                    new_cls = st.selectbox("Class (For Students)", ["None"] + KERALA_CLASSES)
-                with c_u4:
-                    new_med = st.selectbox("Medium", ["Malayalam Medium", "English Medium"])
-                
-                if st.form_submit_button("Save Account", use_container_width=True):
-                    if new_uid and new_pwd and new_name:
-                        ok, msg = add_user(new_uid, new_pwd, new_name, new_role, new_cls, new_med)
-                        if ok:
-                            st.success(msg)
-                        else:
-                            st.error(msg)
-                    else:
-                        st.warning("Please fill in all fields.")
-        with adm2:
-            all_u = get_all_users()
-            for u in all_u:
-                c1, c2, c3, c4, c5 = st.columns([2, 2.5, 1.5, 2, 1])
-                c1.write(f"**{u[0]}**")
-                c2.write(f"{u[1]}")
-                c3.write(f"`{u[2].upper()}`")
-                c4.write(f"🏆 {u[4]} Pts")
-                if u[0] != "admin" and c5.button("Delete", key=f"del_{u[0]}"):
-                    delete_user(u[0])
-                    st.rerun()
-        with adm3:
-            unote = st.text_area("Notice Text:", value=notice)
-            if st.button("Publish Notice"):
-                set_latest_notice(unote)
-                st.success("Notice updated!")
-                st.rerun()
-
-# ----------------- MAIN TABS -----------------
-tab_kbc, tab_live, tab_doubt, tab_img = st.tabs([
-    "🏆 KBC Challenge", 
-    "🎥 Live Classroom", 
-    "🤖 AI Study Mentor", 
-    "📸 Question Lens"
-])
-
-# 1. KBC QUIZ
-with tab_kbc:
-    q_count = count_kbc_questions(selected_class, subject, selected_chapter, selected_medium)
-    
-    col_sc1, col_sc2, col_sc3 = st.columns(3)
-    with col_sc1:
-        st.metric("🏆 Total Score", f"{live_score:,} Pts")
-    with col_sc2:
-        st.metric("🔥 Current Streak", f"{st.session_state['kbc_streak']}")
-    with col_sc3:
-        st.metric("📚 Questions in Chapter", f"{q_count} Available")
-
-    if st.session_state["kbc_q"] is None:
-        q_data = fetch_kbc_question(selected_class, subject, selected_chapter, selected_medium, st.session_state["seen_question_ids"])
-        if q_data:
-            st.session_state["kbc_q"] = q_data
-            st.session_state["seen_question_ids"].add(q_data["id"])
-            st.session_state["kbc_answered"] = False
-            st.session_state["kbc_fifty_used"] = False
-            st.session_state["kbc_disabled_options"] = []
-            st.session_state["kbc_selected_idx"] = None
-
-    if client:
-        col_gen1, col_gen2 = st.columns([3, 1])
-        with col_gen2:
-            if st.button(f"⚡ Add 10 Chapter Questions", use_container_width=True):
-                with st.spinner(f"Fetching SCERT questions for {selected_chapter}..."):
-                    batch = generate_ai_kbc_batch(client, selected_class, subject, selected_chapter, selected_medium, count=10)
-                    if batch:
-                        insert_batch_kbc_questions(selected_class, subject, selected_chapter, selected_medium, batch)
-                        st.success("Added textbook questions successfully!")
-                        st.rerun()
-
-    curr = st.session_state["kbc_q"]
-    if curr:
-        q_html = f"""
-        <div class="kbc-question-card">
-            <span class="kbc-meta-tag">📖 {selected_class} • {subject} | {selected_chapter}</span>
-            <p class="kbc-question-text">{curr['question']}</p>
+    <!-- Auth View -->
+    <div id="auth-view" class="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-2xl mt-12 shadow-2xl">
+        <div class="text-center mb-6">
+            <span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-bold uppercase">Official Portal</span>
+            <h1 class="text-3xl font-extrabold text-white mt-3">GVHSS KUNIYA</h1>
+            <p class="text-slate-400 text-sm mt-1">High-Speed Digital Campus (10th, +1, +2)</p>
         </div>
-        """
-        st.markdown(q_html, unsafe_allow_html=True)
-        
-        if not st.session_state["kbc_fifty_used"] and not st.session_state["kbc_answered"]:
-            if st.button("⚖️ 50:50 Lifeline (Use Once)"):
-                correct = curr["correct_idx"]
-                wrong_indices = [i for i in range(4) if i != correct]
-                st.session_state["kbc_disabled_options"] = random.sample(wrong_indices, 2)
-                st.session_state["kbc_fifty_used"] = True
-                st.rerun()
+        <form onsubmit="handleLogin(event)" class="space-y-4">
+            <div>
+                <label class="text-xs font-semibold text-slate-300">User ID</label>
+                <input id="login-uid" type="text" placeholder="admin / student1" required class="w-full mt-1 bg-slate-800 border border-slate-700 px-4 py-3 rounded-lg text-white focus:outline-none focus:border-amber-400">
+            </div>
+            <div>
+                <label class="text-xs font-semibold text-slate-300">Password</label>
+                <input id="login-pwd" type="password" placeholder="••••••••" required class="w-full mt-1 bg-slate-800 border border-slate-700 px-4 py-3 rounded-lg text-white focus:outline-none focus:border-amber-400">
+            </div>
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg shadow-lg">Sign In</button>
+            <p id="login-err" class="text-red-400 text-sm text-center hidden"></p>
+        </form>
+    </div>
 
-        labels = ["A", "B", "C", "D"]
-        c1, c2 = st.columns(2)
-        
-        for idx in range(4):
-            col = c1 if idx % 2 == 0 else c2
-            opt_text = curr["options"][idx]
-            is_disabled = idx in st.session_state["kbc_disabled_options"]
-            btn_label = f"♦  [{labels[idx]}]   {opt_text}" if not is_disabled else f"♦  [{labels[idx]}]   ─────────"
+    <!-- Portal Dashboard View -->
+    <div id="dash-view" class="w-full max-w-5xl hidden flex-col space-y-6">
+        <!-- Top Bar -->
+        <header class="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-wrap justify-between items-center shadow-lg gap-4">
+            <div>
+                <h1 class="text-2xl font-black text-amber-400">GVHSS KUNIYA</h1>
+                <p class="text-slate-400 text-xs">Govt Vocational Higher Secondary School, Kuniya • Kasaragod</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="text-right">
+                    <p id="user-display" class="font-bold text-white text-sm"></p>
+                    <p id="score-display" class="text-amber-400 font-extrabold text-sm">🏆 0 Pts</p>
+                </div>
+                <button onclick="handleLogout()" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs px-3 py-2 rounded-lg border border-red-500/40">Logout</button>
+            </div>
+        </header>
+
+        <!-- Notice -->
+        <div id="notice-box" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-300 text-sm font-medium"></div>
+
+        <!-- Filter Controls -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
+            <div>
+                <label class="text-xs text-slate-400 font-bold">Class</label>
+                <select id="sel-class" onchange="updateSubjects(); loadQuestion();" class="w-full bg-slate-800 border border-slate-700 text-white p-2 rounded-lg text-sm mt-1">
+                    <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
+                    <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
+                    <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
+                    <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
+                    <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 font-bold">Medium</label>
+                <select id="sel-med" onchange="updateSubjects(); loadQuestion();" class="w-full bg-slate-800 border border-slate-700 text-white p-2 rounded-lg text-sm mt-1">
+                    <option value="Malayalam Medium">Malayalam Medium</option>
+                    <option value="English Medium">English Medium</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 font-bold">Subject</label>
+                <select id="sel-subj" onchange="loadQuestion();" class="w-full bg-slate-800 border border-slate-700 text-white p-2 rounded-lg text-sm mt-1"></select>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="flex space-x-2 border-b border-slate-800 pb-2">
+            <button onclick="switchTab('kbc')" id="tab-btn-kbc" class="px-4 py-2 font-bold text-sm rounded-lg bg-amber-500 text-black">🏆 KBC Quiz</button>
+            <button onclick="switchTab('live')" id="tab-btn-live" class="px-4 py-2 font-bold text-sm rounded-lg text-slate-400 hover:text-white">🎥 Live Classroom</button>
+            <button onclick="switchTab('tutor')" id="tab-btn-tutor" class="px-4 py-2 font-bold text-sm rounded-lg text-slate-400 hover:text-white">🤖 AI Tutor</button>
+        </div>
+
+        <!-- TAB 1: KBC QUIZ -->
+        <div id="tab-kbc" class="space-y-6">
+            <div class="kbc-card p-6 md:p-8 rounded-2xl text-center">
+                <span id="kbc-tag" class="text-xs font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">Hot Seat</span>
+                <h2 id="kbc-q-text" class="text-xl md:text-2xl font-extrabold text-white mt-4 leading-relaxed">Loading question...</h2>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button onclick="answer(0)" id="opt-0" class="kbc-btn p-4 rounded-xl text-left font-semibold text-white"></button>
+                <button onclick="answer(1)" id="opt-1" class="kbc-btn p-4 rounded-xl text-left font-semibold text-white"></button>
+                <button onclick="answer(2)" id="opt-2" class="kbc-btn p-4 rounded-xl text-left font-semibold text-white"></button>
+                <button onclick="answer(3)" id="opt-3" class="kbc-btn p-4 rounded-xl text-left font-semibold text-white"></button>
+            </div>
+            <div id="kbc-feedback" class="hidden p-4 rounded-xl text-sm font-semibold"></div>
+            <button onclick="loadQuestion()" id="btn-next" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg hidden">👉 Next Question</button>
             
-            if col.button(btn_label, key=f"kbc_opt_{idx}", disabled=is_disabled or st.session_state["kbc_answered"], use_container_width=True):
-                st.session_state["kbc_answered"] = True
-                st.session_state["kbc_selected_idx"] = idx
-                if idx == curr["correct_idx"]:
-                    update_user_score(st.session_state["username"], 1000)
-                    st.session_state["kbc_streak"] += 1
-                else:
-                    st.session_state["kbc_streak"] = 0
-                st.rerun()
+            <!-- Hall of Fame -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl mt-8">
+                <h3 class="font-bold text-amber-400 text-sm mb-3">🏅 School Leaderboard</h3>
+                <div id="leader-list" class="space-y-2 text-sm"></div>
+            </div>
+        </div>
 
-        if st.session_state["kbc_answered"]:
-            sel = st.session_state["kbc_selected_idx"]
-            corr = curr["correct_idx"]
-            if sel == corr:
-                st.balloons()
-                st.success(f"🎉 **Correct Answer! (+1,000 Points Added)**\n\n💡 **SCERT Textbook Solution:** {curr['explanation']}")
-            else:
-                st.error(f"❌ **Incorrect!** Correct Answer: **[{labels[corr]}] {curr['options'][corr]}**\n\n💡 **SCERT Textbook Solution:** {curr['explanation']}")
-            
-            if st.button("👉 Next Question (അടുത്ത ചോദ്യം)", use_container_width=True):
-                next_q = fetch_kbc_question(selected_class, subject, selected_chapter, selected_medium, st.session_state["seen_question_ids"])
-                st.session_state["kbc_q"] = next_q
-                if next_q:
-                    st.session_state["seen_question_ids"].add(next_q["id"])
-                st.session_state["kbc_answered"] = False
-                st.session_state["kbc_fifty_used"] = False
-                st.session_state["kbc_disabled_options"] = []
-                st.session_state["kbc_selected_idx"] = None
-                st.rerun()
+        <!-- TAB 2: LIVE CLASSROOM -->
+        <div id="tab-live" class="hidden">
+            <iframe id="jitsi-frame" src="" class="w-full h-[600px] rounded-2xl border border-slate-800" allow="camera; microphone; fullscreen; display-capture"></iframe>
+        </div>
 
-    st.write("---")
-    st.subheader("🏅 School Top Achievers (Leaderboard)")
-    leaders = get_top_students()
-    if leaders:
-        for idx, l in enumerate(leaders, 1):
-            st.write(f"**#{idx} {l[0]}** ({l[1]}) — 🏆 **{l[2]:,} Points**")
-    else:
-        st.caption("No points scored yet. Be the first to top the leaderboard!")
+        <!-- TAB 3: AI TUTOR -->
+        <div id="tab-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
+            <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT AI Doubt Solver</h3>
+            <textarea id="tutor-q" placeholder="Type your syllabus doubt here..." class="w-full bg-slate-800 border border-slate-700 rounded-xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
+            <button onclick="askTutor()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold px-6 py-3 rounded-xl">Ask Doubt</button>
+            <div id="tutor-ans" class="text-slate-300 text-sm leading-relaxed whitespace-pre-line bg-slate-800/60 p-4 rounded-xl border border-slate-700 hidden"></div>
+        </div>
+    </div>
 
-# 2. LIVE CLASSROOM
-with tab_live:
-    ROOM_SALT = "GVHSS_Kuniya_HQ"
-    sanitized_class = selected_class.replace(' ', '_').replace('(', '').replace(')', '').replace('+', 'Plus')
-    sanitized_subj = subject.split(' ')[0]
-    sanitized_med = "MAL" if "Malayalam" in selected_medium else "ENG"
-    room_id = f"KUNIYA_{sanitized_class}_{sanitized_subj}_{sanitized_med}_{ROOM_SALT}"
-    
-    st.info(f"🔴 Live Stream: **{selected_class} - {subject}** ({selected_medium})")
-    display_user = f"{st.session_state['display_name']} ({st.session_state['role'].capitalize()})"
-    jitsi_url = f"https://meet.jit.si/{room_id}#userInfo.displayName=\"{display_user}\""
-    
-    st.iframe(jitsi_url, height=580)
+    <script>
+        let currentUser = null;
+        let currentQ = null;
 
-# 3. AI STUDY MENTOR
-with tab_doubt:
-    st.subheader(f"🤖 Kerala SCERT AI Tutor ({selected_medium})")
-    hint_msg = f"ഉദാ: {selected_chapter} എന്ന പാഠത്തിലെ പ്രധാന ആശയങ്ങൾ വിശദീകരിക്കാമോ?" if "Malayalam" in selected_medium else f"e.g. Explain key concepts in {selected_chapter}."
-    user_q = st.text_area("Ask any textbook concept or doubt:", placeholder=hint_msg)
-    if st.button("Get Explanation"):
-        if client and user_q.strip():
-            with st.spinner("Analyzing Kerala SCERT textbook..."):
-                lang_target = "Explain strictly in clear Malayalam adhering to SCERT Malayalam textbook standards." if "Malayalam" in selected_medium else "Explain in English adhering to SCERT English medium textbook standards."
-                prompt = f"""
-                You are an expert Kerala SCERT teacher for GVHSS KUNIYA school.
-                Class: {selected_class}
-                Subject: {subject}
-                Textbook Chapter: {selected_chapter}
-                Instruction Medium: {selected_medium}
-                Language Requirement: {lang_target}
-                Question: {user_q}
-                """
-                try:
-                    res = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-                    st.markdown(res.text)
-                except Exception as e:
-                    st.error(f"Error fetching response: {e}")
-        elif not client:
-            st.warning("Please configure GEMINI_API_KEY to enable AI Tutoring.")
+        const subjectMap = {
+            "Class 10 (SSLC)": {
+                "Malayalam Medium": ["ഗണിതം (Mathematics)", "ഭൗതികശാസ്ത്രം (Physics)", "രസതന്ത്രം (Chemistry)", "ജീവശാസ്ത്രം (Biology)"],
+                "English Medium": ["Mathematics", "Physics", "Chemistry", "Biology"]
+            },
+            "Plus One (+1 Science)": {
+                "Malayalam Medium": ["Physics", "Chemistry", "Mathematics", "Biology"],
+                "English Medium": ["Physics", "Chemistry", "Mathematics", "Biology"]
+            },
+            "Plus One (+1 Commerce)": {
+                "Malayalam Medium": ["Accountancy", "Business Studies", "Economics"],
+                "English Medium": ["Accountancy", "Business Studies", "Economics"]
+            },
+            "Plus Two (+2 Science)": {
+                "Malayalam Medium": ["Physics", "Chemistry", "Mathematics", "Biology"],
+                "English Medium": ["Physics", "Chemistry", "Mathematics", "Biology"]
+            },
+            "Plus Two (+2 Commerce)": {
+                "Malayalam Medium": ["Accountancy", "Business Studies", "Economics"],
+                "English Medium": ["Accountancy", "Business Studies", "Economics"]
+            }
+        };
 
-# 4. QUESTION LENS
-with tab_img:
-    st.subheader(f"📸 Snap & Solve Textbook Questions ({selected_medium})")
-    up_img = st.file_uploader("Upload question image", type=["png", "jpg", "jpeg"])
-    if up_img:
-        img = Image.open(up_img)
-        st.image(img, use_container_width=True)
-        if st.button("Solve Problem"):
-            if client:
-                with st.spinner("Processing image..."):
-                    lang_target = "Solve in clear Malayalam." if "Malayalam" in selected_medium else "Solve in English."
-                    try:
-                        res = client.models.generate_content(
-                            model=GEMINI_MODEL,
-                            contents=[f"Class: {selected_class}, Subject: {subject}, Chapter: {selected_chapter}, Medium: {selected_medium}. {lang_target} Solve this textbook problem step-by-step.", img]
-                        )
-                        st.markdown(res.text)
-                    except Exception as e:
-                        st.error(f"Error processing image: {e}")
-            else:
-                st.warning("Please configure GEMINI_API_KEY.")
+        function updateSubjects() {
+            const cls = document.getElementById('sel-class').value;
+            const med = document.getElementById('sel-med').value;
+            const subjs = subjectMap[cls][med] || ["General"];
+            const sel = document.getElementById('sel-subj');
+            sel.innerHTML = '';
+            subjs.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s; opt.innerText = s; sel.appendChild(opt);
+            });
+            updateLiveStream();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const u = document.getElementById('login-uid').value;
+            const p = document.getElementById('login-pwd').value;
+            const err = document.getElementById('login-err');
+            try {
+                const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: u, password: p}) });
+                const data = await res.json();
+                if(res.ok) {
+                    currentUser = data.user;
+                    document.getElementById('auth-view').classList.add('hidden');
+                    document.getElementById('dash-view').classList.remove('hidden');
+                    document.getElementById('dash-view').classList.add('flex');
+                    document.getElementById('user-display').innerText = `${currentUser.name} (${currentUser.role.toUpperCase()})`;
+                    document.getElementById('score-display').innerText = `🏆 ${currentUser.score} Pts`;
+                    updateSubjects();
+                    loadNotice();
+                    loadQuestion();
+                    loadLeaders();
+                } else {
+                    err.innerText = data.detail; err.classList.remove('hidden');
+                }
+            } catch(e) {
+                err.innerText = "Network Error connecting to server."; err.classList.remove('hidden');
+            }
+        }
+
+        function handleLogout() {
+            currentUser = null;
+            document.getElementById('dash-view').classList.add('hidden');
+            document.getElementById('dash-view').classList.remove('flex');
+            document.getElementById('auth-view').classList.remove('hidden');
+        }
+
+        async function loadNotice() {
+            const res = await fetch('/api/notice');
+            const data = await res.json();
+            document.getElementById('notice-box').innerText = `📢 Notice: ${data.notice}`;
+        }
+
+        async function loadQuestion() {
+            document.getElementById('kbc-feedback').classList.add('hidden');
+            document.getElementById('btn-next').classList.add('hidden');
+            for(let i=0; i<4; i++) {
+                const b = document.getElementById(`opt-${i}`);
+                b.disabled = false;
+                b.className = "kbc-btn p-4 rounded-xl text-left font-semibold text-white";
+            }
+            const cls = document.getElementById('sel-class').value;
+            const med = document.getElementById('sel-med').value;
+            const subj = document.getElementById('sel-subj').value;
+            document.getElementById('kbc-tag').innerText = `${cls} • ${subj}`;
+            const res = await fetch(`/api/question?target_class=${encodeURIComponent(cls)}&subject=${encodeURIComponent(subj)}&medium=${encodeURIComponent(med)}`);
+            const data = await res.json();
+            currentQ = data.question;
+            if(currentQ) {
+                document.getElementById('kbc-q-text').innerText = currentQ.question;
+                document.getElementById('opt-0').innerText = `[A]  ${currentQ.opt_a}`;
+                document.getElementById('opt-1').innerText = `[B]  ${currentQ.opt_b}`;
+                document.getElementById('opt-2').innerText = `[C]  ${currentQ.opt_c}`;
+                document.getElementById('opt-3').innerText = `[D]  ${currentQ.opt_d}`;
+            } else {
+                document.getElementById('kbc-q-text').innerText = "No questions available in this category yet.";
+            }
+        }
+
+        async function answer(idx) {
+            if(!currentQ) return;
+            for(let i=0; i<4; i++) document.getElementById(`opt-${i}`).disabled = true;
+            const fb = document.getElementById('kbc-feedback');
+            fb.classList.remove('hidden');
+            if(idx === currentQ.correct_idx) {
+                document.getElementById(`opt-${idx}`).className = "p-4 rounded-xl text-left font-semibold bg-emerald-600 border border-emerald-400 text-white";
+                fb.className = "p-4 rounded-xl text-sm font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400";
+                fb.innerText = `🎉 Correct Answer! (+1,000 Points)\\n\\nExplanation: ${currentQ.explanation}`;
+                const res = await fetch('/api/score', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: currentUser.username, points: 1000}) });
+                const d = await res.json();
+                currentUser.score = d.new_score;
+                document.getElementById('score-display').innerText = `🏆 ${currentUser.score} Pts`;
+                loadLeaders();
+            } else {
+                document.getElementById(`opt-${idx}`).className = "p-4 rounded-xl text-left font-semibold bg-rose-600 border border-rose-400 text-white";
+                document.getElementById(`opt-${currentQ.correct_idx}`).className = "p-4 rounded-xl text-left font-semibold bg-emerald-600 border border-emerald-400 text-white";
+                fb.className = "p-4 rounded-xl text-sm font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-400";
+                fb.innerText = `❌ Incorrect!\\n\\nExplanation: ${currentQ.explanation}`;
+            }
+            document.getElementById('btn-next').classList.remove('hidden');
+        }
+
+        async function loadLeaders() {
+            const res = await fetch('/api/leaderboard');
+            const data = await res.json();
+            const div = document.getElementById('leader-list');
+            div.innerHTML = '';
+            data.leaders.forEach((l, i) => {
+                div.innerHTML += `<div class="flex justify-between py-1 border-b border-slate-800"><span>#${i+1} ${l.name} (${l.student_class})</span><strong class="text-amber-400">${l.score} Pts</strong></div>`;
+            });
+        }
+
+        function switchTab(t) {
+            ['kbc', 'live', 'tutor'].forEach(tab => {
+                document.getElementById(`tab-${tab}`).classList.add('hidden');
+                document.getElementById(`tab-btn-${tab}`).className = "px-4 py-2 font-bold text-sm rounded-lg text-slate-400 hover:text-white";
+            });
+            document.getElementById(`tab-${t}`).classList.remove('hidden');
+            document.getElementById(`tab-btn-${t}`).className = "px-4 py-2 font-bold text-sm rounded-lg bg-amber-500 text-black";
+            if(t === 'live') updateLiveStream();
+        }
+
+        function updateLiveStream() {
+            const cls = document.getElementById('sel-class').value.replace(/[^a-zA-Z0-9]/g, '');
+            const med = document.getElementById('sel-med').value.replace(/[^a-zA-Z0-9]/g, '');
+            const room = `GVHSS_KUNIYA_${cls}_${med}_ROOM`;
+            document.getElementById('jitsi-frame').src = `https://meet.jit.si/${room}#userInfo.displayName="${currentUser ? currentUser.name : 'Student'}"`;
+        }
+
+        async function askTutor() {
+            const q = document.getElementById('tutor-q').value;
+            const ans = document.getElementById('tutor-ans');
+            if(!q) return;
+            ans.innerText = "Consulting teacher...";
+            ans.classList.remove('hidden');
+            const res = await fetch('/api/doubt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    student_class: document.getElementById('sel-class').value,
+                    subject: document.getElementById('sel-subj').value,
+                    medium: document.getElementById('sel-med').value,
+                    query: q
+                })
+            });
+            const data = await res.json();
+            ans.innerText = data.answer;
+        }
+    </script>
+</body>
+</html>
+    """
