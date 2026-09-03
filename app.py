@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 from google import genai
 from PIL import Image
 import sqlite3
@@ -122,7 +121,7 @@ st.markdown("""
         text-align: center;
     }
 
-    /* Custom Input and Tabs Styling */
+    /* Inputs & Tabs Styling */
     .stTextInput>div>div>input, .stTextArea>div>div>textarea {
         background: rgba(15, 23, 42, 0.6) !important;
         color: #F8FAFC !important;
@@ -613,7 +612,7 @@ with tab_kbc:
                 st.session_state["kbc_disabled_options"] = []
                 st.rerun()
 
-# 2. LIVE CLASSROOM
+# 2. LIVE CLASSROOM (Replaced with st.iframe)
 with tab_live:
     ROOM_SALT = "GVHSS_Kuniya_Secure"
     sanitized_class = selected_class.replace(' ', '_').replace('(', '').replace(')', '').replace('+', 'Plus')
@@ -625,12 +624,8 @@ with tab_live:
     display_user = f"{st.session_state['display_name']} ({selected_medium})"
     jitsi_url = f"https://meet.jit.si/{room_id}#userInfo.displayName=\"{display_user}\""
     
-    components.html(f"""
-        <iframe src="{jitsi_url}" 
-                style="height: 580px; width: 100%; border-radius: 16px; border: 1px solid rgba(255,255,255,0.15);" 
-                allow="camera; microphone; fullscreen; display-capture; autoplay">
-        </iframe>
-    """, height=600)
+    # Official Streamlit native iframe integration
+    st.iframe(jitsi_url, height=600)
 
 # 3. DOUBT SOLVER
 with tab_doubt:
