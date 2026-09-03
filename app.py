@@ -19,10 +19,9 @@ BACKUP_MODEL = "gemini-2.0-flash"
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# ----------------- POSTGRESQL PERSISTENCE -----------------
+# ----------------- DATABASE MANAGEMENT -----------------
 def get_db():
     if not DATABASE_URL:
-        # Fallback to local SQLite if DATABASE_URL is missing
         import sqlite3
         conn = sqlite3.connect("kuniya_persistent.db", timeout=30.0)
         conn.row_factory = sqlite3.Row
@@ -52,11 +51,6 @@ def init_db():
                 notice_text TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE TABLE IF NOT EXISTS live_rooms (
-                target_class VARCHAR(50) PRIMARY KEY,
-                room_id VARCHAR(100) NOT NULL,
-                updated_by VARCHAR(50) NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS questions (
                 id SERIAL PRIMARY KEY,
                 target_class VARCHAR(50) NOT NULL,
@@ -77,31 +71,11 @@ def init_db():
             c.execute("INSERT INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0);")
             c.execute("INSERT INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0);")
             c.execute("INSERT INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0);")
-            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live with permanent data storage.');")
-            
-            classes = ["Class 10 (SSLC)", "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus Two (+2 Science)", "Plus Two (+2 Commerce)"]
-            for cls in classes:
-                clean_cls = re.sub(r'[^a-zA-Z0-9]', '', cls)
-                c.execute("INSERT INTO live_rooms VALUES (%s, %s, 'Admin');", (cls, f"GVHSS_KUNIYA_{clean_cls}_2026"))
-                
-            sample_qs = [
-                ("Class 10 (SSLC)", "Mathematics", "English Medium", 1, "What is the common difference of the sequence: 5, 9, 13, 17...?", "2", "3", "4", "5", 2, "Common difference d = 9 - 5 = 4."),
-                ("Class 10 (SSLC)", "Mathematics", "English Medium", 2, "What is the 10th term of the sequence: 3, 7, 11, 15...?", "35", "39", "41", "43", 1, "x_n = 4n - 1. x_10 = 4(10) - 1 = 39."),
-                ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electric resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms (Ω)."),
-                ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "പൊതുവ്യത്യാസം d = 9 - 5 = 4."),
-                ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു.")
-            ]
-            for q in sample_qs:
-                c.execute("""
-                    INSERT INTO questions (target_class, subject, medium, level, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """, q)
+            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Campus Live.');")
     else:
-        # SQLite execution
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT, student_class TEXT, medium TEXT, score INT);
             CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY AUTOINCREMENT, notice_text TEXT);
-            CREATE TABLE IF NOT EXISTS live_rooms (target_class TEXT PRIMARY KEY, room_id TEXT, updated_by TEXT);
             CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, target_class TEXT, subject TEXT, medium TEXT, level INT, question TEXT, opt_a TEXT, opt_b TEXT, opt_c TEXT, opt_d TEXT, correct_idx INT, explanation TEXT);
         """)
         c.execute("SELECT username FROM users WHERE username = 'admin'")
@@ -146,12 +120,6 @@ class UserAddReq(BaseModel):
 class AuthActionReq(BaseModel):
     auth_user: str
     auth_pass: str
-
-class RoomUpdateReq(BaseModel):
-    auth_user: str
-    auth_pass: str
-    target_class: str
-    room_id: str
 
 class ScoreUpdateReq(BaseModel):
     username: str
@@ -217,7 +185,7 @@ def add_user(req: UserAddReq):
         conn.commit()
         conn.close()
         return {"status": "ok", "message": f"User {req.username} saved permanently."}
-    except Exception as e:
+    except Exception:
         conn.close()
         raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -233,34 +201,6 @@ def delete_user(username: str, req: AuthActionReq):
     conn.commit()
     conn.close()
     return {"status": "ok"}
-
-@app.get("/api/live-room")
-def get_live_room(target_class: str):
-    conn = get_db()
-    c = conn.cursor()
-    query = "SELECT room_id, updated_by FROM live_rooms WHERE target_class = %s" if is_postgres() else "SELECT room_id, updated_by FROM live_rooms WHERE target_class = ?"
-    c.execute(query, (target_class,))
-    row = c.fetchone()
-    conn.close()
-    clean_cls = re.sub(r'[^a-zA-Z0-9]', '', target_class)
-    return {"room_id": row["room_id"] if row else f"GVHSS_{clean_cls}_HQ", "updated_by": row["updated_by"] if row else "Admin"}
-
-@app.post("/api/live-room")
-def set_live_room(req: RoomUpdateReq):
-    conn = get_db()
-    c = conn.cursor()
-    verify_staff(c, req.auth_user, req.auth_pass)
-    clean_room = re.sub(r'[^a-zA-Z0-9_-]', '', req.room_id.strip())
-    if is_postgres():
-        c.execute("""
-            INSERT INTO live_rooms (target_class, room_id, updated_by) VALUES (%s, %s, %s)
-            ON CONFLICT (target_class) DO UPDATE SET room_id = EXCLUDED.room_id, updated_by = EXCLUDED.updated_by;
-        """, (req.target_class, clean_room, req.auth_user))
-    else:
-        c.execute("INSERT OR REPLACE INTO live_rooms VALUES (?, ?, ?)", (req.target_class, clean_room, req.auth_user))
-    conn.commit()
-    conn.close()
-    return {"status": "ok", "room_id": clean_room}
 
 @app.get("/api/notice")
 def get_notice():
@@ -312,7 +252,7 @@ def update_score(req: ScoreUpdateReq):
 @app.post("/api/doubt")
 def ask_doubt(req: DoubtReq):
     if not ai_client:
-        return {"answer": "AI key is not configured in environment variables."}
+        return {"answer": "AI key is not configured."}
     
     prompt = f"""
     You are an expert Kerala SCERT textbook educator for GVHSS KUNIYA.
@@ -320,9 +260,9 @@ def ask_doubt(req: DoubtReq):
     Subject: {req.subject}
     Medium: {req.medium}
 
-    Mandatory Rules:
-    1. Do not use LaTeX, dollar signs ($ or $$), or markdown formatting stars.
-    2. Write formulas in clean plain text only (e.g., x10, S20, +, -, *, /, =, sqrt).
+    Mandatory Output Rules:
+    1. Strictly avoid LaTeX, dollar signs ($ or $$), and formatting stars (**).
+    2. Write equations in standard plain text only (e.g. x10, S20, +, -, *, /, =, sqrt).
     3. If Medium is 'Malayalam Medium', reply strictly in natural Malayalam.
     4. If Medium is 'English Medium', reply in clear, concise English.
 
@@ -338,7 +278,7 @@ def ask_doubt(req: DoubtReq):
         except Exception as e:
             return {"answer": f"Tutor error: {str(e)}"}
 
-# ----------------- FRONTEND UI (IN-APP UNLIMITED VIDEO) -----------------
+# ----------------- FRONTEND UI -----------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -360,7 +300,6 @@ def index():
 </head>
 <body class="min-h-screen p-3 md:p-6 flex flex-col items-center">
 
-    <!-- LOGIN PANEL -->
     <div id="auth-panel" class="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-3xl mt-10 shadow-2xl">
         <div class="text-center mb-6">
             <span class="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-bold uppercase tracking-wider">Official Portal</span>
@@ -381,7 +320,6 @@ def index():
         </form>
     </div>
 
-    <!-- MAIN DASHBOARD -->
     <div id="main-panel" class="w-full max-w-6xl hidden flex-col space-y-5">
         <header class="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-wrap justify-between items-center shadow-lg gap-4">
             <div>
@@ -399,7 +337,6 @@ def index():
 
         <div id="notice-display" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 text-sm font-medium"></div>
 
-        <!-- Academic Selectors (Locked for students) -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-900 p-4 rounded-2xl border border-slate-800">
             <div>
                 <label class="text-xs text-slate-400 font-bold uppercase">Class Level</label>
@@ -424,7 +361,6 @@ def index():
             </div>
         </div>
 
-        <!-- Navigation Tabs -->
         <div class="flex space-x-2 border-b border-slate-800 pb-2">
             <button onclick="nav('kbc')" id="tb-kbc" class="px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black">🏆 KBC Arena</button>
             <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 Unlimited Live Class</button>
@@ -432,7 +368,7 @@ def index():
             <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Control Panel</button>
         </div>
 
-        <!-- VIEW 1: KBC ARENA -->
+        <!-- KBC -->
         <div id="view-kbc" class="grid grid-cols-1 lg:grid-cols-4 gap-5">
             <div class="lg:col-span-3 space-y-4">
                 <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-3 rounded-2xl">
@@ -462,7 +398,6 @@ def index():
                 <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question</button>
             </div>
 
-            <!-- Ladder -->
             <div class="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-1.5 text-xs font-bold">
                 <div class="text-slate-400 uppercase tracking-wider text-[11px] mb-3 text-center">Score Progress Ladder</div>
                 <div id="ladder-10" class="flex justify-between p-2 rounded-lg bg-slate-800/40 text-amber-300"><span>10. Jackpot</span><span>1,00,00,000 Pts</span></div>
@@ -478,28 +413,28 @@ def index():
             </div>
         </div>
 
-        <!-- VIEW 2: UNLIMITED LIVE CLASS (NO APP LOGIN REQUIRED) -->
+        <!-- VIEW 2: 100% UNLIMITED NO-LOGIN CLASSROOM -->
         <div id="view-live" class="hidden flex-col space-y-4">
             <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl">
                 <div>
                     <h3 id="live-header" class="text-lg font-black text-emerald-400">Classroom Live Stream</h3>
-                    <p class="text-xs text-slate-400">50-60 students capacity • Unlimited hours • Direct browser access</p>
+                    <p class="text-xs text-slate-400">Unlimited Duration • Direct In-App Browser Access (No App or Login Needed)</p>
                 </div>
-                <button onclick="reloadLiveFrame()" class="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700">🔄 Reconnect Camera/Mic</button>
+                <button onclick="reloadLiveFrame()" class="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700">🔄 Reload Stream</button>
             </div>
-            <iframe id="live-frame" class="w-full h-[640px] rounded-3xl border border-slate-800 bg-slate-950" allow="camera; microphone; fullscreen; display-capture"></iframe>
+            <iframe id="live-frame" class="w-full h-[660px] rounded-3xl border border-slate-800 bg-slate-950" allow="camera; microphone; fullscreen; display-capture"></iframe>
         </div>
 
-        <!-- VIEW 3: AI SCERT TUTOR -->
+        <!-- VIEW 3: AI TUTOR -->
         <div id="view-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4">
             <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT Deep Learning Tutor</h3>
-            <p class="text-xs text-slate-400">Clean, human-readable textbook explanations without code clutter.</p>
+            <p class="text-xs text-slate-400">Clean, human-readable textbook solutions without formula symbols or code syntax.</p>
             <textarea id="tutor-in" placeholder="Ask your textbook doubt..." class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
             <button onclick="requestDoubtSolution()" class="bg-amber-500 hover:bg-amber-400 text-black font-black px-6 py-3 rounded-xl shadow-md">Solve Textbook Doubt</button>
             <div id="tutor-out" class="text-slate-200 text-sm leading-relaxed whitespace-pre-line bg-slate-800/80 p-5 rounded-2xl border border-slate-700 hidden"></div>
         </div>
 
-        <!-- VIEW 4: ADMIN CONTROL PANEL -->
+        <!-- VIEW 4: ADMIN -->
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
                 <h3 class="text-xl font-black text-amber-400">Control Hub (Permanent Storage)</h3>
@@ -663,16 +598,15 @@ def index():
             document.getElementById('notice-display').innerText = `📢 Official Announcement: ${d.notice}`;
         }
 
-        async function updateLiveFrame() {
+        function updateLiveFrame() {
             const targetClass = document.getElementById('sel-class').value;
             document.getElementById('live-header').innerText = `${targetClass} • High-Capacity Classroom`;
-            const r = await fetch(`/api/live-room?target_class=${encodeURIComponent(targetClass)}`);
-            const d = await r.json();
-            const room = d.room_id;
+            const cleanCls = targetClass.replace(/[^a-zA-Z0-9]/g, '');
+            const room = `GVHSS_KUNIYA_${cleanCls}_ACADEMY_HQ`;
             const displayName = encodeURIComponent(me ? `${me.name} (${me.role.toUpperCase()})` : "Student");
             
-            // ടൈം ലിമിറ്റില്ലാത്ത ഓപ്പൺ വെബ്‌ആർടിസി ക്ലൗഡ് ഫ്രെയിം (ലോഗിൻ ആവശ്യമില്ല)
-            document.getElementById('live-frame').src = `https://meet.jit.si/${room}#config.prejoinPageEnabled=false&config.disableDeepLinking=true&userInfo.displayName="${displayName}"`;
+            // 5-മിനുട്ട് ലിമിറ്റില്ലാത്ത ഓപ്പൺ ഡൊമെയ്ൻ നോഡ് ഉപയോഗിക്കുന്നു
+            document.getElementById('live-frame').src = `https://jitsi.riot.im/${room}#userInfo.displayName="${displayName}"`;
         }
 
         function reloadLiveFrame() {
