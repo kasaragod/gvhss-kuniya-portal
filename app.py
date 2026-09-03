@@ -13,12 +13,167 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- KERALA SYLLABUS DATA -----------------
+# ----------------- KBC THEME STYLING (SAFE INLINE CSS) -----------------
+st.markdown("""
+<style>
+    /* KBC Question Box */
+    .kbc-question-card {
+        background: linear-gradient(135deg, #0b132b 0%, #1c2541 50%, #0b132b 100%);
+        border: 2px solid #e5a93b;
+        border-radius: 16px;
+        padding: 24px;
+        text-align: center;
+        box-shadow: 0 0 20px rgba(229, 169, 59, 0.35);
+        margin-bottom: 25px;
+    }
+    .kbc-question-text {
+        color: #ffffff !important;
+        font-size: 1.25rem !important;
+        font-weight: 700;
+        line-height: 1.6;
+        margin: 0;
+    }
+    .kbc-meta-tag {
+        display: inline-block;
+        background-color: rgba(229, 169, 59, 0.2);
+        color: #fbd46d;
+        border: 1px solid #e5a93b;
+        border-radius: 20px;
+        padding: 4px 14px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+    }
+    /* KBC Option Buttons */
+    div[data-testid="column"] button {
+        background: linear-gradient(180deg, #162447 0%, #1f4068 100%) !important;
+        color: #ffffff !important;
+        border: 1.5px solid #d4af37 !important;
+        border-radius: 12px !important;
+        padding: 14px 16px !important;
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        transition: all 0.25s ease-in-out !important;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3) !important;
+    }
+    div[data-testid="column"] button:hover {
+        background: linear-gradient(180deg, #d4af37 0%, #aa820a 100%) !important;
+        color: #0b132b !important;
+        border-color: #ffffff !important;
+        transform: scale(1.02);
+        box-shadow: 0 0 15px rgba(229, 169, 59, 0.7) !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ----------------- KERALA SCERT SYLLABUS & CHAPTERS -----------------
 KERALA_CLASSES = [
     "Class 8", "Class 9", "Class 10 (SSLC)",
     "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus One (+1 Humanities)",
     "Plus Two (+2 Science)", "Plus Two (+2 Commerce)", "Plus Two (+2 Humanities)"
 ]
+
+SCERT_CHAPTERS = {
+    # Class 10 (SSLC)
+    ("Class 10 (SSLC)", "Mathematics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)",
+        "2. Circles (വൃത്തങ്ങൾ)",
+        "3. Mathematics of Chance (സാധ്യതകളുടെ ഗണിതം)",
+        "4. Second Degree Equations (രണ്ടാംകൃതി സമവാക്യങ്ങൾ)",
+        "5. Trigonometry (ത്രികോണമിതി)",
+        "6. Coordinates (സൂചകസംഖ്യകൾ)",
+        "7. Tangents (തൊടുവരകൾ)",
+        "8. Solids (ഘനരൂപങ്ങൾ)",
+        "9. Geometry and Algebra (ജ്യാമിതിയും ബീജഗണിതവും)",
+        "10. Polynomials (ബഹുപദങ്ങൾ)",
+        "11. Statistics (സ്ഥിതിവിവരക്കണക്ക്)"
+    ],
+    ("Class 10 (SSLC)", "Physics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Effects of Electric Current (വൈദ്യുതി പ്രവാഹത്തിന്റെ ഫലങ്ങൾ)",
+        "2. Magnetic Effect of Electric Current (വൈദ്യുതപ്രവാഹത്തിന്റെ കാന്തികഫലം)",
+        "3. Electromagnetic Induction (വൈദ്യുതകാന്തിക പ്രേരണ)",
+        "4. Reflection of Light (പ്രകാശത്തിന്റെ പ്രതിപതനം)",
+        "5. Refraction of Light (പ്രകാശത്തിന്റെ അപവർത്തനം)",
+        "6. Vision and the World of Colours (കാഴ്ചയും വർണ്ണങ്ങളുടെ ലോകവും)",
+        "7. Energy Management (ഊർജ്ജപരിപാലനം)"
+    ],
+    ("Class 10 (SSLC)", "Chemistry"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Periodic Table and Electronic Configuration (പീരിയോഡിക് ടേബിളും ഇലക്ട്രോൺ വിന്യാസവും)",
+        "2. Gas Laws and Mole Concept (വാതകനിയമങ്ങളും മോൾ സങ്കല്പനവും)",
+        "3. Reactivity Series and Electrochemistry (പ്രവർത്തനതീവ്രതാ ശ്രേണിയും വൈദ്യുതരസതന്ത്രവും)",
+        "4. Production of Metals (ലോഹനിർമ്മാണം)",
+        "5. Compounds of Non-Metals (അലോഹസംയുക്തങ്ങൾ)",
+        "6. Nomenclature of Organic Compounds (ഓർഗാനിക് സംയുക്തങ്ങളുടെ നാമകരണം)",
+        "7. Chemical Reactions of Organic Compounds (ഓർഗാനിക് രാസപ്രവർത്തനങ്ങൾ)"
+    ],
+    ("Class 10 (SSLC)", "Biology"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Sensations and Responses (അറിയാനും പ്രതികരിക്കാനും)",
+        "2. Windows of Knowledge (അറിവിന്റെ വാതായനങ്ങൾ)",
+        "3. Chemical Messages for Homeostasis (സമസ്ഥിതിക്കായുള്ള രാസസന്ദേശങ്ങൾ)",
+        "4. Keeping Diseases Away (രോഗങ്ങളെ അകറ്റിനിർത്താം)",
+        "5. Soldiers of Defense (പ്രതിരോധത്തിന്റെ കാവലാളുകൾ)",
+        "6. Unravelling Genetic Mysteries (ജനിതക രഹസ്യങ്ങൾ തേടി)",
+        "7. Genetics for Future (നാളെയുടെ ജനിതകം)",
+        "8. The Paths Traversed by Life (ജീവന്റെ നാൾവഴികൾ)"
+    ],
+    # Class 9
+    ("Class 9", "Mathematics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Area (പരപ്പളവ്)",
+        "2. Decimal Forms (ദശാംശരൂപങ്ങൾ)",
+        "3. Pairs of Equations (സമവാക്യജോഡികൾ)",
+        "4. New Numbers (പുതിയ സംഖ്യകൾ)",
+        "5. Circle Measures (വൃത്തപ്പരപ്പളവ്)",
+        "6. Parallel Lines (സമാന്തരവരകൾ)"
+    ],
+    ("Class 9", "Physics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Forces in Fluids (ദ്രാവകങ്ങളിലെ ബലങ്ങൾ)",
+        "2. Equations of Motion (ചലനസമവാക്യങ്ങൾ)",
+        "3. Motion and Laws of Motion (ചലനവും ചലനനിയമങ്ങളും)",
+        "4. Gravitation (ഗുരുത്വാകർഷണം)",
+        "5. Work, Energy and Power (പ്രവൃത്തി, ഊർജ്ജം, പവർ)"
+    ],
+    # Plus One Science (+1)
+    ("Plus One (+1 Science)", "Physics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Units and Measurements",
+        "2. Motion in a Straight Line",
+        "3. Motion in a Plane",
+        "4. Laws of Motion",
+        "5. Work, Energy and Power",
+        "6. System of Particles and Rotational Motion",
+        "7. Gravitation",
+        "8. Thermodynamics"
+    ],
+    ("Plus One (+1 Science)", "Chemistry"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Some Basic Concepts of Chemistry",
+        "2. Structure of Atom",
+        "3. Classification of Elements & Periodicity",
+        "4. Chemical Bonding and Molecular Structure",
+        "5. Chemical Thermodynamics",
+        "6. Equilibrium",
+        "7. Organic Chemistry - Basics"
+    ],
+    # Plus Two Science (+2)
+    ("Plus Two (+2 Science)", "Physics"): [
+        "All Chapters (എല്ലാ പാഠങ്ങളും)",
+        "1. Electric Charges and Fields",
+        "2. Electrostatic Potential and Capacitance",
+        "3. Current Electricity",
+        "4. Moving Charges and Magnetism",
+        "5. Magnetism and Matter",
+        "6. Electromagnetic Induction",
+        "7. Alternating Current",
+        "8. Ray Optics and Optical Instruments",
+        "9. Wave Optics"
+    ]
+}
 
 def get_subjects(cls_name, medium):
     is_mal = "Malayalam" in medium
@@ -48,6 +203,18 @@ def get_subjects(cls_name, medium):
         "History", "Economics", "Political Science", "Sociology", "English"
     ]
 
+def get_chapters_for_selection(cls_name, subj_name):
+    # Normalize subject name
+    norm_subj = "Mathematics" if "ഗണിതം" in subj_name or "Math" in subj_name else \
+                "Physics" if "ഭൗതിക" in subj_name or "Physic" in subj_name else \
+                "Chemistry" if "രസതന്ത്രം" in subj_name or "Chemi" in subj_name else \
+                "Biology" if "ജീവശാസ്ത്രം" in subj_name or "Bio" in subj_name else subj_name
+    
+    key = (cls_name, norm_subj)
+    if key in SCERT_CHAPTERS:
+        return SCERT_CHAPTERS[key]
+    return ["All Chapters (എല്ലാ പാഠങ്ങളും)", "Unit 1", "Unit 2", "Unit 3", "Unit 4", "Unit 5"]
+
 # ----------------- DATABASE MANAGEMENT -----------------
 DB_FILE = "kuniya_portal.db"
 
@@ -61,7 +228,8 @@ def init_db():
             name TEXT NOT NULL,
             role TEXT NOT NULL,
             student_class TEXT,
-            medium TEXT DEFAULT 'Malayalam Medium'
+            medium TEXT DEFAULT 'Malayalam Medium',
+            score INTEGER DEFAULT 0
         )
     ''')
     c.execute('''
@@ -76,6 +244,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             target_class TEXT NOT NULL,
             subject TEXT NOT NULL,
+            chapter TEXT NOT NULL DEFAULT 'All Chapters',
             medium TEXT NOT NULL,
             question TEXT NOT NULL,
             opt_a TEXT NOT NULL,
@@ -90,29 +259,67 @@ def init_db():
     # Pre-seed Admin
     c.execute('SELECT * FROM users WHERE username = ?', ('admin',))
     if not c.fetchone():
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', 
-                  ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium'))
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', 
-                  ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium'))
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', 
-                  ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'Malayalam Medium'))
+        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                  ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0))
+        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                  ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium', 0))
+        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                  ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0))
         c.execute('INSERT INTO notices (notice_text) VALUES (?)', 
-                  ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod. Academic sessions are active.',))
+                  ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.',))
 
-    # Pre-seed standard questions
+    # Textbook Questions Seed
+    initial_questions = [
+        # Class 10 SSLC - English Medium Maths
+        ("Class 10 (SSLC)", "Mathematics", "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)", "English Medium", 
+         "What is the common difference of the Arithmetic Progression: 4, 7, 10, 13...?", "2", "3", "4", "5", 1, 
+         "Common difference d = 7 - 4 = 3."),
+        ("Class 10 (SSLC)", "Mathematics", "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)", "English Medium", 
+         "What is the 10th term of the arithmetic sequence: 2, 5, 8, 11...?", "26", "29", "31", "32", 1, 
+         "Algebraic form x_n = 3n - 1. For n = 10, x_10 = 3(10) - 1 = 29."),
+        ("Class 10 (SSLC)", "Mathematics", "2. Circles (വൃത്തങ്ങൾ)", "English Medium", 
+         "What is the angle subtended by a diameter in a semicircle?", "45°", "60°", "90°", "180°", 2, 
+         "An angle in a semicircle is always a right angle (90°)."),
+        ("Class 10 (SSLC)", "Mathematics", "3. Mathematics of Chance (സാധ്യതകളുടെ ഗണിതം)", "English Medium", 
+         "A box contains 6 red beads and 4 white beads. What is the probability of taking a red bead?", "3/5", "2/5", "1/2", "1/4", 0, 
+         "Probability = Favorable (6) / Total (10) = 6/10 = 3/5."),
+        ("Class 10 (SSLC)", "Mathematics", "4. Second Degree Equations (രണ്ടാംകൃതി സമവാക്യങ്ങൾ)", "English Medium", 
+         "If x^2 + 6x = 16, what positive value of x satisfies this quadratic equation?", "2", "4", "6", "8", 0, 
+         "(x + 3)^2 = 16 + 9 = 25 => x + 3 = 5 => x = 2."),
+         
+        # Class 10 SSLC - English Medium Physics
+        ("Class 10 (SSLC)", "Physics", "1. Effects of Electric Current (വൈദ്യുതി പ്രവാഹത്തിന്റെ ഫലങ്ങൾ)", "English Medium", 
+         "Which law states that the heat produced in a resistor is directly proportional to the square of the current?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Ampere's Law", 1, 
+         "Joule's Law of Heating gives H = I^2 * R * t."),
+        ("Class 10 (SSLC)", "Physics", "6. Vision and the World of Colours (കാഴ്ചയും വർണ്ണങ്ങളുടെ ലോകവും)", "English Medium", 
+         "Which optical phenomenon is primarily responsible for the blue appearance of the clear sky?", "Total Internal Reflection", "Dispersion", "Scattering of Light", "Refraction", 2, 
+         "Rayleigh scattering by atmospheric gas molecules scatters shorter blue wavelengths most effectively."),
+
+        # Class 10 SSLC - Malayalam Medium
+        ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)", "Malayalam Medium", 
+         "4, 7, 10, 13... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്രയാണ്?", "2", "3", "4", "5", 1, 
+         "പൊതുവ്യത്യാസം d = 7 - 4 = 3 ആണ്."),
+        ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "1. Arithmetic Sequences (സമാന്തരശ്രേണികൾ)", "Malayalam Medium", 
+         "2, 5, 8, 11... എന്ന സമാന്തരശ്രേണിയുടെ പത്താം പദം എത്രയാണ്?", "26", "29", "31", "32", 1, 
+         "ബീജഗണിത രൂപം x_n = 3n - 1; n = 10 ആകുമ്പോൾ x_10 = 29."),
+        ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "2. Circles (വൃത്തങ്ങൾ)", "Malayalam Medium", 
+         "ഒരു അർദ്ധവൃത്തത്തിലെ കോണിന്റെ അളവ് എത്രയാണ്?", "45°", "60°", "90°", "180°", 2, 
+         "അർദ്ധവൃത്തത്തിലെ കോൺ എപ്പോഴും മട്ടക്കോൺ (90 ഡിഗ്രി) ആയിരിക്കും."),
+        ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "1. Effects of Electric Current (വൈദ്യുതി പ്രവാഹത്തിന്റെ ഫലങ്ങൾ)", "Malayalam Medium", 
+         "വൈദ്യുത പ്രവാഹം മൂലം ഉണ്ടാകുന്ന താപോർജ്ജം H = I^2 * R * t എന്ന സമവാക്യവുമായി ബന്ധപ്പെട്ട നിയമം ഏത്?", "ഓം നിയമം", "ജൂൾ നിയമം", "ഫാരഡെ നിയമം", "ലെൻസ് നിയമം", 1, 
+         "ജൂൾ നിയമം (Joule's Law of Heating) ആണ് കറന്റും താപവും തമ്മിലുള്ള ബന്ധം വ്യക്തമാക്കുന്നത്."),
+        ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "6. Vision and the World of Colours (കാഴ്ചയും വർണ്ണങ്ങളുടെ ലോകവും)", "Malayalam Medium", 
+         "ആകാശത്തിന് നീലനിറം കാണപ്പെടാൻ കാരണമായ പ്രകാശ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "പൂർണ്ണാന്തര പ്രതിപതനം", "പ്രകാശ വിസരണം", "പ്രകീർണ്ണനം", 2, 
+         "പ്രകാശത്തിന്റെ വിസരണം (Scattering of Light) കാരണമാണ് ആകാശം നീലനിറമായി കാണപ്പെടുന്നത്.")
+    ]
+    
     c.execute('SELECT COUNT(*) FROM kbc_questions')
-    if c.fetchone()[0] == 0:
-        sample_q = [
-            ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", "4, 7, 10, 13... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്രയാണ്?", "2", "3", "4", "5", 1, "പൊതുവ്യത്യാസം d = 7 - 4 = 3 ആണ്."),
-            ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", "ആകാശത്തിന് നീലനിറം കാണപ്പെടാൻ കാരണമായ പ്രകാശ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "പൂർണ്ണാന്തര പ്രതിപതനം", "പ്രകാശ വിസരണം", "പ്രകീർണ്ണനം", 2, "പ്രകാശത്തിന്റെ വിസരണം (Scattering) കാരണമാണ് ആകാശം നീലനിറമായി കാണപ്പെടുന്നത്."),
-            ("Class 10 (SSLC)", "രസതന്ത്രം (Chemistry)", "Malayalam Medium", "ബേക്കിംഗ് സോഡയുടെ രാസനാമം എന്താണ്?", "സോഡിയം ക്ലോറൈഡ്", "സോഡിയം ഹൈഡ്രജൻ കാർബണേറ്റ്", "കാൽസ്യം ഹൈഡ്രോക്സൈഡ്", "സോഡിയം ഹൈഡ്രോക്സൈഡ്", 1, "സോഡിയം ഹൈഡ്രജൻ കാർബണേറ്റ് (NaHCO3) ആണ് ബേക്കിംഗ് സോഡ."),
-            ("Class 10 (SSLC)", "Mathematics", "English Medium", "What is the common difference of the AP: 4, 7, 10, 13...?", "2", "3", "4", "5", 1, "Common difference d = 7 - 4 = 3."),
-            ("Class 10 (SSLC)", "Physics", "English Medium", "Which optical phenomenon causes the blue appearance of the sky?", "Reflection", "Total Internal Reflection", "Scattering of Light", "Dispersion", 2, "Rayleigh scattering of light causes the blue color.")
-        ]
-        for q in sample_q:
+    if c.fetchone()[0] < 5:
+        c.execute('DELETE FROM kbc_questions')
+        for q in initial_questions:
             c.execute('''
-                INSERT INTO kbc_questions (target_class, subject, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO kbc_questions (target_class, subject, chapter, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', q)
 
     conn.commit()
@@ -123,17 +330,32 @@ init_db()
 def get_user(username):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT username, password, name, role, student_class, medium FROM users WHERE username = ?', (username,))
+    c.execute('SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ?', (username,))
     row = c.fetchone()
     conn.close()
     if row:
-        return {"username": row[0], "password": row[1], "name": row[2], "role": row[3], "class": row[4], "medium": row[5]}
+        return {"username": row[0], "password": row[1], "name": row[2], "role": row[3], "class": row[4], "medium": row[5], "score": row[6] or 0}
     return None
+
+def update_user_score(username, points):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('UPDATE users SET score = score + ? WHERE username = ?', (points, username))
+    conn.commit()
+    conn.close()
+
+def get_top_students():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT name, student_class, score FROM users WHERE role = "student" ORDER BY score DESC LIMIT 5')
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
 def get_all_users():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT username, name, role, student_class, medium FROM users ORDER BY role, name')
+    c.execute('SELECT username, name, role, student_class, score FROM users ORDER BY role, name')
     rows = c.fetchall()
     conn.close()
     return rows
@@ -142,7 +364,7 @@ def add_user(username, password, name, role, student_class, medium):
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', (username, password, name, role, student_class, medium))
+        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', (username, password, name, role, student_class, medium, 0))
         conn.commit()
         conn.close()
         return True, f"User '{username}' created successfully!"
@@ -171,17 +393,50 @@ def get_latest_notice():
     conn.close()
     return row[0] if row else "Welcome to GVHSS KUNIYA Digital Campus."
 
-# ----------------- KBC ENGINE -----------------
-def fetch_kbc_question(target_class, subject, medium):
+# ----------------- KBC CHAPTER-WISE ENGINE -----------------
+def fetch_kbc_question(target_class, subject, chapter, medium, exclude_ids=[]):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('''
+    
+    placeholders = ','.join('?' for _ in exclude_ids) if exclude_ids else '0'
+    
+    # 1. Check if specific chapter requested
+    if "All Chapters" not in chapter:
+        query = f'''
+            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+            FROM kbc_questions 
+            WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ? AND id NOT IN ({placeholders})
+            ORDER BY RANDOM() LIMIT 1
+        '''
+        params = [target_class, subject, chapter, medium] + list(exclude_ids)
+        c.execute(query, params)
+        row = c.fetchone()
+        if row:
+            conn.close()
+            return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
+    
+    # 2. Check across subject
+    query = f'''
         SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
         FROM kbc_questions 
-        WHERE target_class = ? AND subject = ? AND medium = ?
+        WHERE target_class = ? AND subject = ? AND medium = ? AND id NOT IN ({placeholders})
         ORDER BY RANDOM() LIMIT 1
-    ''', (target_class, subject, medium))
+    '''
+    params = [target_class, subject, medium] + list(exclude_ids)
+    c.execute(query, params)
     row = c.fetchone()
+    
+    # 3. Fallback to any question in medium
+    if not row:
+        c.execute(f'''
+            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+            FROM kbc_questions 
+            WHERE medium = ? AND id NOT IN ({placeholders})
+            ORDER BY RANDOM() LIMIT 1
+        ''', [medium] + list(exclude_ids))
+        row = c.fetchone()
+        
+    # 4. If all exhausted, reset and get any
     if not row:
         c.execute('''
             SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
@@ -190,6 +445,7 @@ def fetch_kbc_question(target_class, subject, medium):
             ORDER BY RANDOM() LIMIT 1
         ''', (medium,))
         row = c.fetchone()
+        
     conn.close()
     if row:
         return {
@@ -199,44 +455,49 @@ def fetch_kbc_question(target_class, subject, medium):
         }
     return None
 
-def count_kbc_questions(target_class, subject, medium):
+def count_kbc_questions(target_class, subject, chapter, medium):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND medium = ?', (target_class, subject, medium))
+    if "All Chapters" not in chapter:
+        c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ?', (target_class, subject, chapter, medium))
+    else:
+        c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND medium = ?', (target_class, subject, medium))
     cnt = c.fetchone()[0]
     conn.close()
     return cnt
 
-def insert_batch_kbc_questions(target_class, subject, medium, q_list):
+def insert_batch_kbc_questions(target_class, subject, chapter, medium, q_list):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for q in q_list:
         try:
             c.execute('''
-                INSERT INTO kbc_questions (target_class, subject, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (target_class, subject, medium, q["q"], q["options"][0], q["options"][1], q["options"][2], q["options"][3], q["answer_idx"], q["exp"]))
+                INSERT INTO kbc_questions (target_class, subject, chapter, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (target_class, subject, chapter, medium, q["q"], q["options"][0], q["options"][1], q["options"][2], q["options"][3], q["answer_idx"], q["exp"]))
         except Exception:
             continue
     conn.commit()
     conn.close()
 
-def generate_ai_kbc_batch(client, target_class, subject, medium, count=10):
-    lang_inst = "Generate questions and options strictly in clear Malayalam." if "Malayalam" in medium else "Generate questions and options in English."
+def generate_ai_kbc_batch(client, target_class, subject, chapter, medium, count=10):
+    lang_inst = "Generate questions, options, and explanations strictly in standard Malayalam adhering to SCERT Kerala Malayalam medium textbooks." if "Malayalam" in medium else "Generate questions, options, and explanations in English based on SCERT Kerala textbooks."
     prompt = f"""
-    Create {count} multiple-choice quiz questions based on the Kerala SCERT textbook curriculum for GVHSS KUNIYA.
+    Create {count} multiple-choice quiz questions based strictly on the official Kerala SCERT curriculum for GVHSS KUNIYA.
     Class: {target_class}
     Subject: {subject}
+    Textbook Chapter / Unit: {chapter}
     Medium: {medium}
     {lang_inst}
     
+    Ensure all questions directly reflect questions, exercises, or concept checkpoints found in Kerala SCERT textbooks.
     Return ONLY a valid JSON array of objects without markdown formatting:
     [
       {{
         "q": "Question text?",
         "options": ["Option A", "Option B", "Option C", "Option D"],
         "answer_idx": 0,
-        "exp": "Detailed explanation note"
+        "exp": "Textbook reference and step-by-step reason"
       }}
     ]
     """
@@ -259,10 +520,10 @@ if "authenticated" not in st.session_state:
     st.session_state["student_class"] = None
     st.session_state["medium"] = "Malayalam Medium"
 
+if "seen_question_ids" not in st.session_state:
+    st.session_state["seen_question_ids"] = set()
 if "kbc_q" not in st.session_state:
     st.session_state["kbc_q"] = None
-if "kbc_score" not in st.session_state:
-    st.session_state["kbc_score"] = 0
 if "kbc_streak" not in st.session_state:
     st.session_state["kbc_streak"] = 0
 if "kbc_answered" not in st.session_state:
@@ -304,14 +565,15 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ----------------- MAIN DASHBOARD -----------------
+current_user = get_user(st.session_state["username"])
+live_score = current_user["score"] if current_user else 0
 
-# Clean Native Header
 c_head1, c_head2 = st.columns([3, 1])
 with c_head1:
     st.title("🎓 GVHSS KUNIYA")
     st.caption("Govt Vocational Higher Secondary School, Kuniya • Kasaragod, Kerala")
 with c_head2:
-    st.info(f"**{st.session_state['display_name']}**\n\nRole: `{st.session_state['role'].upper()}`")
+    st.info(f"**{st.session_state['display_name']}**\n\nRole: `{st.session_state['role'].upper()}` | 🏆 **{live_score:,} Pts**")
 
 # Notice
 notice = get_latest_notice()
@@ -322,6 +584,7 @@ st.write("---")
 st.sidebar.title("My Profile")
 st.sidebar.write(f"**Name:** {st.session_state['display_name']}")
 st.sidebar.write(f"**Role:** {st.session_state['role'].capitalize()}")
+st.sidebar.write(f"**Total Score:** 🏆 {live_score:,} Pts")
 
 # Medium Selector
 medium_idx = 0 if st.session_state["medium"] == "Malayalam Medium" else 1
@@ -333,6 +596,7 @@ selected_medium = st.sidebar.radio(
 if selected_medium != st.session_state["medium"]:
     st.session_state["medium"] = selected_medium
     st.session_state["kbc_q"] = None
+    st.session_state["seen_question_ids"] = set()
     st.rerun()
 
 if st.sidebar.button("Logout", use_container_width=True):
@@ -340,8 +604,8 @@ if st.sidebar.button("Logout", use_container_width=True):
     st.session_state["username"] = None
     st.rerun()
 
-# Class and Subject selection
-col_sel1, col_sel2 = st.columns(2)
+# Class, Subject & Chapter Selection
+col_sel1, col_sel2, col_sel3 = st.columns([1.2, 1.2, 1.6])
 with col_sel1:
     if st.session_state["role"] in ["admin", "teacher"]:
         selected_class = st.selectbox("Academic Class", KERALA_CLASSES)
@@ -352,6 +616,10 @@ with col_sel2:
     available_subjects = get_subjects(selected_class, selected_medium)
     subject = st.selectbox("Subject", available_subjects)
 
+with col_sel3:
+    chapter_list = get_chapters_for_selection(selected_class, subject)
+    selected_chapter = st.selectbox("Textbook Chapter / Unit", chapter_list)
+
 # AI Setup
 api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key) if api_key else None
@@ -359,7 +627,7 @@ client = genai.Client(api_key=api_key) if api_key else None
 # ----------------- ADMIN CONSOLE -----------------
 if st.session_state["role"] == "admin":
     with st.expander("⚙️ Admin Management Console", expanded=False):
-        adm1, adm2, adm3 = st.tabs(["➕ Add User / Admin", "👥 Registered Users", "📢 Update Notice"])
+        adm1, adm2, adm3 = st.tabs(["➕ Add User / Admin", "👥 Registered Users & Scores", "📢 Update Notice"])
         with adm1:
             with st.form("add_user_form"):
                 c_u1, c_u2 = st.columns(2)
@@ -385,11 +653,11 @@ if st.session_state["role"] == "admin":
         with adm2:
             all_u = get_all_users()
             for u in all_u:
-                c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 2, 1])
+                c1, c2, c3, c4, c5 = st.columns([2, 2.5, 1.5, 2, 1])
                 c1.write(f"**{u[0]}**")
                 c2.write(f"{u[1]}")
                 c3.write(f"`{u[2].upper()}`")
-                c4.write(f"{u[4] if len(u) > 4 else '-'}")
+                c4.write(f"🏆 {u[4]} Pts")
                 if u[0] != "admin" and c5.button("Delete", key=f"del_{u[0]}"):
                     delete_user(u[0])
                     st.rerun()
@@ -408,49 +676,61 @@ tab_kbc, tab_live, tab_doubt, tab_img = st.tabs([
     "📸 Question Lens"
 ])
 
-# 1. KBC QUIZ
+# 1. KBC QUIZ WITH KBC THEME
 with tab_kbc:
-    q_count = count_kbc_questions(selected_class, subject, selected_medium)
+    q_count = count_kbc_questions(selected_class, subject, selected_chapter, selected_medium)
     
     col_sc1, col_sc2, col_sc3 = st.columns(3)
     with col_sc1:
-        st.metric("🏆 Score", f"{st.session_state['kbc_score']:,} Pts")
+        st.metric("🏆 Total Score", f"{live_score:,} Pts")
     with col_sc2:
-        st.metric("🔥 Streak", f"{st.session_state['kbc_streak']}")
+        st.metric("🔥 Current Streak", f"{st.session_state['kbc_streak']}")
     with col_sc3:
-        st.metric(f"📚 Question Pool", f"{q_count}")
+        st.metric("📚 Questions in Chapter", f"{q_count} Available")
 
+    # Fetch fresh unseen question for this chapter
     if st.session_state["kbc_q"] is None:
-        q_data = fetch_kbc_question(selected_class, subject, selected_medium)
+        q_data = fetch_kbc_question(selected_class, subject, selected_chapter, selected_medium, st.session_state["seen_question_ids"])
         if q_data:
             st.session_state["kbc_q"] = q_data
+            st.session_state["seen_question_ids"].add(q_data["id"])
             st.session_state["kbc_answered"] = False
             st.session_state["kbc_fifty_used"] = False
             st.session_state["kbc_disabled_options"] = []
             st.session_state["kbc_selected_idx"] = None
 
-    if client and q_count < 10:
-        if st.button(f"⚡ Generate 10 Questions via AI ({selected_medium})"):
-            with st.spinner("Preparing questions..."):
-                batch = generate_ai_kbc_batch(client, selected_class, subject, selected_medium, count=10)
-                if batch:
-                    insert_batch_kbc_questions(selected_class, subject, selected_medium, batch)
-                    st.success("Questions added to pool!")
-                    st.rerun()
+    if client:
+        col_gen1, col_gen2 = st.columns([3, 1])
+        with col_gen2:
+            if st.button(f"⚡ Add 10 Chapter Questions", use_container_width=True):
+                with st.spinner(f"Fetching SCERT questions for {selected_chapter}..."):
+                    batch = generate_ai_kbc_batch(client, selected_class, subject, selected_chapter, selected_medium, count=10)
+                    if batch:
+                        insert_batch_kbc_questions(selected_class, subject, selected_chapter, selected_medium, batch)
+                        st.success("Added textbook questions successfully!")
+                        st.rerun()
 
     curr = st.session_state["kbc_q"]
     if curr:
-        st.info(f"📍 **{selected_class} • {subject} ({selected_medium})**")
-        st.subheader(f"❓ {curr['question']}")
+        # KBC Question Display
+        q_html = f"""
+        <div class="kbc-question-card">
+            <span class="kbc-meta-tag">📖 {selected_class} • {subject} | {selected_chapter}</span>
+            <p class="kbc-question-text">{curr['question']}</p>
+        </div>
+        """
+        st.markdown(q_html, unsafe_allow_html=True)
         
+        # 50:50 Lifeline
         if not st.session_state["kbc_fifty_used"] and not st.session_state["kbc_answered"]:
-            if st.button("⚖️ 50:50 Lifeline"):
+            if st.button("⚖️ 50:50 Lifeline (Use Once)"):
                 correct = curr["correct_idx"]
                 wrong_indices = [i for i in range(4) if i != correct]
                 st.session_state["kbc_disabled_options"] = random.sample(wrong_indices, 2)
                 st.session_state["kbc_fifty_used"] = True
                 st.rerun()
 
+        # Options in KBC Style
         labels = ["A", "B", "C", "D"]
         c1, c2 = st.columns(2)
         
@@ -458,13 +738,13 @@ with tab_kbc:
             col = c1 if idx % 2 == 0 else c2
             opt_text = curr["options"][idx]
             is_disabled = idx in st.session_state["kbc_disabled_options"]
-            btn_label = f"[{labels[idx]}]  {opt_text}" if not is_disabled else f"[{labels[idx]}]  ---"
+            btn_label = f"♦  [{labels[idx]}]   {opt_text}" if not is_disabled else f"♦  [{labels[idx]}]   ─────────"
             
             if col.button(btn_label, key=f"kbc_opt_{idx}", disabled=is_disabled or st.session_state["kbc_answered"], use_container_width=True):
                 st.session_state["kbc_answered"] = True
                 st.session_state["kbc_selected_idx"] = idx
                 if idx == curr["correct_idx"]:
-                    st.session_state["kbc_score"] += 1000
+                    update_user_score(st.session_state["username"], 1000)
                     st.session_state["kbc_streak"] += 1
                 else:
                     st.session_state["kbc_streak"] = 0
@@ -475,17 +755,30 @@ with tab_kbc:
             corr = curr["correct_idx"]
             if sel == corr:
                 st.balloons()
-                st.success(f"🎉 **Correct Answer! (+1,000 Pts)**\n\n💡 **Explanation:** {curr['explanation']}")
+                st.success(f"🎉 **Correct Answer! (+1,000 Points Added)**\n\n💡 **SCERT Textbook Solution:** {curr['explanation']}")
             else:
-                st.error(f"❌ **Incorrect!** Correct Answer: **[{labels[corr]}] {curr['options'][corr]}**\n\n💡 **Explanation:** {curr['explanation']}")
+                st.error(f"❌ **Incorrect!** Correct Answer: **[{labels[corr]}] {curr['options'][corr]}**\n\n💡 **SCERT Textbook Solution:** {curr['explanation']}")
             
-            if st.button("👉 Next Question", use_container_width=True):
-                st.session_state["kbc_q"] = fetch_kbc_question(selected_class, subject, selected_medium)
+            if st.button("👉 Next Question (അടുത്ത ചോദ്യം)", use_container_width=True):
+                next_q = fetch_kbc_question(selected_class, subject, selected_chapter, selected_medium, st.session_state["seen_question_ids"])
+                st.session_state["kbc_q"] = next_q
+                if next_q:
+                    st.session_state["seen_question_ids"].add(next_q["id"])
                 st.session_state["kbc_answered"] = False
                 st.session_state["kbc_fifty_used"] = False
                 st.session_state["kbc_disabled_options"] = []
                 st.session_state["kbc_selected_idx"] = None
                 st.rerun()
+
+    # Hall of Fame / Leaderboard
+    st.write("---")
+    st.subheader("🏅 School Top Achievers (Leaderboard)")
+    leaders = get_top_students()
+    if leaders:
+        for idx, l in enumerate(leaders, 1):
+            st.write(f"**#{idx} {l[0]}** ({l[1]}) — 🏆 **{l[2]:,} Points**")
+    else:
+        st.caption("No points scored yet. Be the first to top the leaderboard!")
 
 # 2. LIVE CLASSROOM
 with tab_live:
@@ -504,16 +797,17 @@ with tab_live:
 # 3. AI STUDY MENTOR
 with tab_doubt:
     st.subheader(f"🤖 Kerala SCERT AI Tutor ({selected_medium})")
-    hint_msg = "ഉദാ: വൃത്തങ്ങൾ എന്ന പാഠത്തിലെ പ്രധാന സമവാക്യങ്ങൾ വിശദീകരിക്കാമോ?" if "Malayalam" in selected_medium else "e.g. Explain Lenz's law with formula."
+    hint_msg = f"ഉദാ: {selected_chapter} എന്ന പാഠത്തിലെ പ്രധാന ആശയങ്ങൾ വിശദീകരിക്കാമോ?" if "Malayalam" in selected_medium else f"e.g. Explain key concepts in {selected_chapter}."
     user_q = st.text_area("Ask any textbook concept or doubt:", placeholder=hint_msg)
     if st.button("Get Explanation"):
         if client and user_q.strip():
-            with st.spinner("Analyzing syllabus..."):
+            with st.spinner("Analyzing Kerala SCERT textbook..."):
                 lang_target = "Explain strictly in clear Malayalam adhering to SCERT Malayalam textbook standards." if "Malayalam" in selected_medium else "Explain in English adhering to SCERT English medium textbook standards."
                 prompt = f"""
                 You are an expert Kerala SCERT teacher for GVHSS KUNIYA school.
                 Class: {selected_class}
                 Subject: {subject}
+                Textbook Chapter: {selected_chapter}
                 Instruction Medium: {selected_medium}
                 Language Requirement: {lang_target}
                 Question: {user_q}
@@ -536,7 +830,7 @@ with tab_img:
                     lang_target = "Solve in clear Malayalam." if "Malayalam" in selected_medium else "Solve in English."
                     res = client.models.generate_content(
                         model="gemini-2.5-flash",
-                        contents=[f"Class: {selected_class}, Subject: {subject}, Medium: {selected_medium}. {lang_target} Solve this problem step-by-step.", img]
+                        contents=[f"Class: {selected_class}, Subject: {subject}, Chapter: {selected_chapter}, Medium: {selected_medium}. {lang_target} Solve this textbook problem step-by-step.", img]
                     )
                     st.markdown(res.text)
             else:
