@@ -11,7 +11,10 @@ app = FastAPI(title="GVHSS KUNIYA Unified Engine")
 
 DB_FILE = "kuniya_persistent.db"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.0-flash"
+
+# 2026 നിലവിലെ ലേറ്റസ്റ്റ് പ്രൊഡക്ഷൻ മോഡലുകൾ
+PRIMARY_MODEL = "gemini-3.6-flash"
+FALLBACK_MODEL = "gemini-2.5-flash"
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
@@ -60,7 +63,6 @@ def init_db():
             );
         """)
         
-        # Default Admin & Test Student
         c.execute("SELECT username FROM users WHERE username = 'admin'")
         if not c.fetchone():
             c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0)")
@@ -68,7 +70,6 @@ def init_db():
             c.execute("INSERT OR IGNORE INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0)")
             c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live for 10th, +1, and +2.')")
             
-        # Rich KBC Question Set across Levels
         c.execute("SELECT COUNT(*) FROM questions")
         if c.fetchone()[0] == 0:
             sample_qs = [
@@ -228,11 +229,17 @@ def ask_doubt(req: DoubtReq):
     
     Student Query: {req.query}
     """
+    
+    # 3.6-flash ശ്രമിക്കുകയും, ലഭിച്ചില്ലെങ്കിൽ 2.5-flash ഉപയോഗിക്കുകയും ചെയ്യുന്നു
     try:
-        res = ai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        res = ai_client.models.generate_content(model=PRIMARY_MODEL, contents=prompt)
         return {"answer": res.text}
-    except Exception as e:
-        return {"answer": f"Tutor engine temporarily busy: {str(e)}"}
+    except Exception:
+        try:
+            res = ai_client.models.generate_content(model=FALLBACK_MODEL, contents=prompt)
+            return {"answer": res.text}
+        except Exception as e:
+            return {"answer": f"Tutor engine error: {str(e)}"}
 
 # ----------------- MODERN FRONTEND INTERFACE -----------------
 @app.get("/", response_class=HTMLResponse)
@@ -245,7 +252,7 @@ def index():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GVHSS KUNIYA - Advanced KBC Learning Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Gayathri:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070B14; color: #F8FAFC; }
         .kbc-arena { background: radial-gradient(circle at center, #111D4A 0%, #060A17 100%); border: 2px solid #E5A93B; box-shadow: 0 0 35px rgba(229, 169, 59, 0.25); }
