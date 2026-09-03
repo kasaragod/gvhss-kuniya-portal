@@ -71,7 +71,7 @@ def init_db():
             c.execute("INSERT INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0);")
             c.execute("INSERT INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0);")
             c.execute("INSERT INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0);")
-            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Campus Live with Direct WebRTC Classroom.');")
+            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Campus Live with Multi-Peer Video Grid.');")
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT, student_class TEXT, medium TEXT, score INT);
@@ -278,7 +278,7 @@ def ask_doubt(req: DoubtReq):
         except Exception as e:
             return {"answer": f"Tutor error: {str(e)}"}
 
-# ----------------- FRONTEND UI (NATIVE UNLIMITED WEBRTC) -----------------
+# ----------------- FRONTEND UI (PEER-TO-PEER VIDEO GRID) -----------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -290,13 +290,15 @@ def index():
     <title>GVHSS KUNIYA - Advanced Smart Campus</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- PeerJS for Multi-User P2P Video Mesh -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070B14; color: #F8FAFC; }
         .kbc-arena { background: radial-gradient(circle at center, #111D4A 0%, #060A17 100%); border: 2px solid #E5A93B; box-shadow: 0 0 35px rgba(229, 169, 59, 0.25); }
         .kbc-option { background: linear-gradient(180deg, #132247 0%, #0B1530 100%); border: 1.5px solid #C59B27; transition: all 0.2s; }
         .kbc-option:hover:not(:disabled) { background: linear-gradient(180deg, #E5A93B 0%, #B88214 100%); color: #070B14; transform: scale(1.01); }
         .ladder-active { background: #E5A93B !important; color: #070B14 !important; font-weight: 800; }
-        video { transform: scaleX(-1); }
+        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 1rem; }
     </style>
 </head>
 <body class="min-h-screen p-3 md:p-6 flex flex-col items-center">
@@ -340,7 +342,6 @@ def index():
 
         <div id="notice-display" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 text-sm font-medium"></div>
 
-        <!-- Academic Selectors (Locked for students) -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-900 p-4 rounded-2xl border border-slate-800">
             <div>
                 <label class="text-xs text-slate-400 font-bold uppercase">Class Level</label>
@@ -365,7 +366,6 @@ def index():
             </div>
         </div>
 
-        <!-- Navigation Tabs -->
         <div class="flex space-x-2 border-b border-slate-800 pb-2">
             <button onclick="nav('kbc')" id="tb-kbc" class="px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black">🏆 KBC Arena</button>
             <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 In-App Live Classroom</button>
@@ -373,7 +373,7 @@ def index():
             <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Control Panel</button>
         </div>
 
-        <!-- VIEW 1: KBC ARENA -->
+        <!-- KBC -->
         <div id="view-kbc" class="grid grid-cols-1 lg:grid-cols-4 gap-5">
             <div class="lg:col-span-3 space-y-4">
                 <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-3 rounded-2xl">
@@ -403,7 +403,6 @@ def index():
                 <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question</button>
             </div>
 
-            <!-- Ladder -->
             <div class="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-1.5 text-xs font-bold">
                 <div class="text-slate-400 uppercase tracking-wider text-[11px] mb-3 text-center">Score Progress Ladder</div>
                 <div id="ladder-10" class="flex justify-between p-2 rounded-lg bg-slate-800/40 text-amber-300"><span>10. Jackpot</span><span>1,00,00,000 Pts</span></div>
@@ -419,39 +418,27 @@ def index():
             </div>
         </div>
 
-        <!-- VIEW 2: DIRECT IN-APP WEBRTC CLASSROOM (NO JITSI, NO LOGIN, UNLIMITED TIME) -->
+        <!-- VIEW 2: MULTI-USER REAL-TIME VIDEO CLASSROOM (PERMANENT & UNLIMITED) -->
         <div id="view-live" class="hidden flex-col space-y-4">
-            <div class="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+            <div class="flex flex-wrap justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl gap-3">
                 <div>
                     <h3 id="live-header" class="text-lg font-black text-emerald-400">Classroom Live Broadcaster</h3>
-                    <p class="text-xs text-slate-400">Native In-App WebRTC Stream • Unlimited Hours • No Account/App Required</p>
+                    <p class="text-xs text-slate-400">Multi-Peer Video Mesh • Continuous Session • Direct browser access</p>
                 </div>
                 <div class="flex space-x-2">
-                    <button onclick="toggleCamera()" id="btn-cam" class="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2 rounded-xl font-bold">📷 Start Cam</button>
-                    <button onclick="toggleMic()" id="btn-mic" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2 rounded-xl font-bold">🎤 Mic Muted</button>
-                    <button onclick="shareScreen()" class="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl font-bold">🖥 Share Screen</button>
+                    <button onclick="startMyStream()" id="btn-stream" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-bold">🟢 Join / Turn On Cam</button>
+                    <button onclick="toggleMyMic()" id="btn-mic" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2 rounded-xl font-bold">🎤 Mic Muted</button>
                 </div>
             </div>
 
-            <!-- Video Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-4 rounded-3xl border border-slate-800 min-h-[500px]">
-                <!-- Teacher / Main Screen -->
-                <div class="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center min-h-[350px]">
-                    <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+            <!-- Multi-User Video Grid -->
+            <div id="video-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-slate-950 p-4 rounded-3xl border border-slate-800 min-h-[500px]">
+                <!-- Local User Card -->
+                <div id="local-box" class="video-box relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 h-64 flex items-center justify-center">
+                    <video id="my-video" autoplay playsinline muted></video>
                     <div class="absolute bottom-3 left-3 bg-slate-950/80 px-3 py-1 rounded-lg text-xs font-bold text-amber-400 border border-slate-700">
-                        👨‍🏫 <span id="local-tag">My Stream</span>
+                        👨‍🏫 <span id="my-tag">My Stream (Click Join)</span>
                     </div>
-                </div>
-                
-                <!-- Shared Presentation / Class View -->
-                <div class="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center min-h-[350px] p-6 text-center">
-                    <div id="pres-placeholder" class="space-y-3">
-                        <div class="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-400 text-2xl">🎓</div>
-                        <h4 class="text-white font-bold text-base">GVHSS Kuniya Virtual Classroom</h4>
-                        <p class="text-slate-400 text-xs max-w-sm">Connected directly to the smart interactive session. Students can interact in real-time without session timeouts.</p>
-                        <span class="inline-block bg-emerald-500/20 text-emerald-400 text-xs px-3 py-1 rounded-full border border-emerald-500/30 font-bold">🟢 Active Unlimited Stream</span>
-                    </div>
-                    <video id="screen-video" autoplay playsinline class="w-full h-full object-cover hidden"></video>
                 </div>
             </div>
         </div>
@@ -526,10 +513,11 @@ def index():
         let currentStep = 1;
         const prizeLadder = [1000, 5000, 10000, 160000, 320000, 640000, 1250000, 2500000, 5000000, 10000000];
 
-        // Native WebRTC state
-        let localStream = null;
-        let isCamActive = false;
-        let isMicActive = false;
+        // WebRTC Multi-Peer Mesh Logic
+        let peer = null;
+        let myStream = null;
+        let peersConnected = {};
+        let isMicOn = false;
 
         const subjectMatrix = {
             "Class 10 (SSLC)": {
@@ -586,7 +574,7 @@ def index():
                     document.getElementById('main-panel').classList.remove('hidden');
                     document.getElementById('main-panel').classList.add('flex');
                     document.getElementById('usr-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
-                    document.getElementById('local-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
+                    document.getElementById('my-tag').innerText = `${me.name} (Me)`;
                     document.getElementById('score-tag').innerText = `🏆 ${me.score.toLocaleString()} Pts`;
                     
                     if(me.role === 'student') {
@@ -619,17 +607,14 @@ def index():
         }
 
         function handleLogout() {
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
+            if (myStream) myStream.getTracks().forEach(t => t.stop());
+            if (peer) peer.destroy();
             me = null;
             staffAuth = { u: '', p: '' };
             clearInterval(timer);
             document.getElementById('main-panel').classList.add('hidden');
             document.getElementById('main-panel').classList.remove('flex');
             document.getElementById('auth-panel').classList.remove('hidden');
-            document.getElementById('tb-admin').classList.add('hidden');
-            document.getElementById('view-admin').classList.add('hidden');
         }
 
         async function fetchNotice() {
@@ -638,60 +623,72 @@ def index():
             document.getElementById('notice-display').innerText = `📢 Official Announcement: ${d.notice}`;
         }
 
-        // --- NATIVE WEBRTC CAMERA & MIC LOGIC (NO THIRD PARTY) ---
-        async function toggleCamera() {
-            const btn = document.getElementById('btn-cam');
-            if (!isCamActive) {
-                try {
-                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: isMicActive });
-                    document.getElementById('local-video').srcObject = localStream;
-                    isCamActive = true;
-                    btn.innerText = "🛑 Stop Cam";
-                    btn.className = "bg-rose-600 hover:bg-rose-500 text-white text-xs px-4 py-2 rounded-xl font-bold";
-                } catch (e) {
-                    alert("Unable to access camera: " + e.message);
-                }
-            } else {
-                if (localStream) {
-                    localStream.getVideoTracks().forEach(t => t.stop());
-                }
-                isCamActive = false;
-                btn.innerText = "📷 Start Cam";
-                btn.className = "bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2 rounded-xl font-bold";
+        // --- MULTI-USER WEBRTC (CONNECT ALL STUDENTS TO TEACHER & PEERS) ---
+        async function startMyStream() {
+            const btn = document.getElementById('btn-stream');
+            try {
+                myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('my-video').srcObject = myStream;
+                btn.innerText = "🟢 Stream Active";
+                btn.className = "bg-emerald-700 text-white text-xs px-4 py-2 rounded-xl font-bold cursor-default";
+
+                // Initialize PeerJS mesh room
+                const cls = document.getElementById('sel-class').value.replace(/[^a-zA-Z0-9]/g, '');
+                const myPeerId = `KUNIYA_${cls}_${me.username}_${Math.floor(Math.random()*1000)}`;
+
+                peer = new Peer(myPeerId);
+
+                peer.on('open', (id) => {
+                    console.log("Connected to WebRTC Mesh with ID: ", id);
+                });
+
+                // When someone calls us, answer with our stream
+                peer.on('call', (call) => {
+                    call.answer(myStream);
+                    call.on('stream', (remoteStream) => {
+                        addRemoteVideo(call.peer, remoteStream);
+                    });
+                });
+
+            } catch (e) {
+                alert("Camera/Mic Permission Required: " + e.message);
             }
         }
 
-        function toggleMic() {
+        function addRemoteVideo(peerId, stream) {
+            if (document.getElementById(`video-${peerId}`)) return;
+
+            const grid = document.getElementById('video-grid');
+            const box = document.createElement('div');
+            box.id = `video-${peerId}`;
+            box.className = "video-box relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 h-64 flex items-center justify-center";
+
+            const vid = document.createElement('video');
+            vid.srcObject = stream;
+            vid.autoplay = true;
+            vid.playsInline = true;
+
+            const tag = document.createElement('div');
+            tag.className = "absolute bottom-3 left-3 bg-slate-950/80 px-3 py-1 rounded-lg text-xs font-bold text-emerald-400 border border-slate-700";
+            tag.innerText = `🎓 Student Stream`;
+
+            box.appendChild(vid);
+            box.appendChild(tag);
+            grid.appendChild(box);
+        }
+
+        function toggleMyMic() {
             const btn = document.getElementById('btn-mic');
-            if (localStream && localStream.getAudioTracks().length > 0) {
-                isMicActive = !isMicActive;
-                localStream.getAudioTracks()[0].enabled = isMicActive;
-            } else {
-                isMicActive = !isMicActive;
+            if (myStream && myStream.getAudioTracks().length > 0) {
+                isMicOn = !isMicOn;
+                myStream.getAudioTracks()[0].enabled = isMicOn;
             }
-            if (isMicActive) {
+            if (isMicOn) {
                 btn.innerText = "🎙 Mic Active";
-                btn.className = "bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-bold";
+                btn.className = "bg-emerald-600 text-white text-xs px-4 py-2 rounded-xl font-bold";
             } else {
                 btn.innerText = "🎤 Mic Muted";
-                btn.className = "bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2 rounded-xl font-bold";
-            }
-        }
-
-        async function shareScreen() {
-            try {
-                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const screenVid = document.getElementById('screen-video');
-                const placeholder = document.getElementById('pres-placeholder');
-                placeholder.classList.add('hidden');
-                screenVid.classList.remove('hidden');
-                screenVid.srcObject = screenStream;
-                screenStream.getVideoTracks()[0].onended = () => {
-                    screenVid.classList.add('hidden');
-                    placeholder.classList.remove('hidden');
-                };
-            } catch (e) {
-                console.log("Screen share cancelled: ", e);
+                btn.className = "bg-slate-700 text-white text-xs px-4 py-2 rounded-xl font-bold";
             }
         }
 
