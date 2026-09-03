@@ -35,6 +35,14 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
     
+    classes = [
+        "Class 10 (SSLC)", 
+        "Plus One (+1 Science)", 
+        "Plus One (+1 Commerce)", 
+        "Plus Two (+2 Science)", 
+        "Plus Two (+2 Commerce)"
+    ]
+
     if is_postgres():
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -50,6 +58,11 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 notice_text TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS classroom_rooms (
+                target_class VARCHAR(50) PRIMARY KEY,
+                room_url TEXT NOT NULL,
+                updated_by VARCHAR(50) NOT NULL
             );
             CREATE TABLE IF NOT EXISTS questions (
                 id SERIAL PRIMARY KEY,
@@ -71,17 +84,26 @@ def init_db():
             c.execute("INSERT INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0);")
             c.execute("INSERT INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0);")
             c.execute("INSERT INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0);")
-            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Campus Live with Multi-Peer Video Grid.');")
+            c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Campus Live.');")
+            
+            # ക്ലാസ് തിരിച്ച് പ്രത്യേക റൂമുകൾ
+            for cls in classes:
+                clean_cls = re.sub(r'[^a-zA-Z0-9]', '', cls).lower()
+                c.execute("INSERT INTO classroom_rooms VALUES (%s, %s, 'Admin');", (cls, f"https://kuniya-{clean_cls}.daily.co/room"))
     else:
         c.execute("""
             CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT, student_class TEXT, medium TEXT, score INT);
             CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY AUTOINCREMENT, notice_text TEXT);
+            CREATE TABLE IF NOT EXISTS classroom_rooms (target_class TEXT PRIMARY KEY, room_url TEXT, updated_by TEXT);
             CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, target_class TEXT, subject TEXT, medium TEXT, level INT, question TEXT, opt_a TEXT, opt_b TEXT, opt_c TEXT, opt_d TEXT, correct_idx INT, explanation TEXT);
         """)
         c.execute("SELECT username FROM users WHERE username = 'admin'")
         if not c.fetchone():
             c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
             c.execute("INSERT OR IGNORE INTO notices (notice_text) VALUES ('GVHSS KUNIYA Portal Active.')")
+            for cls in classes:
+                clean_cls = re.sub(r'[^a-zA-Z0-9]', '', cls).lower()
+                c.execute("INSERT OR IGNORE INTO classroom_rooms VALUES (?, ?, 'Admin')", (cls, f"https://kuniya-{clean_cls}.daily.co/room"))
 
     conn.commit()
     conn.close()
@@ -120,6 +142,12 @@ class UserAddReq(BaseModel):
 class AuthActionReq(BaseModel):
     auth_user: str
     auth_pass: str
+
+class RoomUpdateReq(BaseModel):
+    auth_user: str
+    auth_pass: str
+    target_class: str
+    room_url: str
 
 class ScoreUpdateReq(BaseModel):
     username: str
@@ -202,6 +230,34 @@ def delete_user(username: str, req: AuthActionReq):
     conn.close()
     return {"status": "ok"}
 
+@app.get("/api/classroom-room")
+def get_classroom_room(target_class: str):
+    conn = get_db()
+    c = conn.cursor()
+    query = "SELECT room_url, updated_by FROM classroom_rooms WHERE target_class = %s" if is_postgres() else "SELECT room_url, updated_by FROM classroom_rooms WHERE target_class = ?"
+    c.execute(query, (target_class,))
+    row = c.fetchone()
+    conn.close()
+    clean_cls = re.sub(r'[^a-zA-Z0-9]', '', target_class).lower()
+    return {"room_url": row["room_url"] if row else f"https://kuniya-{clean_cls}.daily.co/room", "updated_by": row["updated_by"] if row else "Admin"}
+
+@app.post("/api/classroom-room")
+def set_classroom_room(req: RoomUpdateReq):
+    conn = get_db()
+    c = conn.cursor()
+    verify_staff(c, req.auth_user, req.auth_pass)
+    clean_url = req.room_url.strip()
+    if is_postgres():
+        c.execute("""
+            INSERT INTO classroom_rooms (target_class, room_url, updated_by) VALUES (%s, %s, %s)
+            ON CONFLICT (target_class) DO UPDATE SET room_url = EXCLUDED.room_url, updated_by = EXCLUDED.updated_by;
+        """, (req.target_class, clean_url, req.auth_user))
+    else:
+        c.execute("INSERT OR REPLACE INTO classroom_rooms VALUES (?, ?, ?)", (req.target_class, clean_url, req.auth_user))
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "room_url": clean_url}
+
 @app.get("/api/notice")
 def get_notice():
     conn = get_db()
@@ -278,7 +334,7 @@ def ask_doubt(req: DoubtReq):
         except Exception as e:
             return {"answer": f"Tutor error: {str(e)}"}
 
-# ----------------- FRONTEND UI (PEER-TO-PEER VIDEO GRID) -----------------
+# ----------------- FRONTEND UI -----------------
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -290,15 +346,12 @@ def index():
     <title>GVHSS KUNIYA - Advanced Smart Campus</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <!-- PeerJS for Multi-User P2P Video Mesh -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #070B14; color: #F8FAFC; }
         .kbc-arena { background: radial-gradient(circle at center, #111D4A 0%, #060A17 100%); border: 2px solid #E5A93B; box-shadow: 0 0 35px rgba(229, 169, 59, 0.25); }
         .kbc-option { background: linear-gradient(180deg, #132247 0%, #0B1530 100%); border: 1.5px solid #C59B27; transition: all 0.2s; }
         .kbc-option:hover:not(:disabled) { background: linear-gradient(180deg, #E5A93B 0%, #B88214 100%); color: #070B14; transform: scale(1.01); }
         .ladder-active { background: #E5A93B !important; color: #070B14 !important; font-weight: 800; }
-        .video-box video { width: 100%; height: 100%; object-fit: cover; border-radius: 1rem; }
     </style>
 </head>
 <body class="min-h-screen p-3 md:p-6 flex flex-col items-center">
@@ -342,6 +395,7 @@ def index():
 
         <div id="notice-display" class="bg-amber-500/10 border-l-4 border-amber-500 p-4 rounded-xl text-amber-200 text-sm font-medium"></div>
 
+        <!-- Academic Selectors -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-900 p-4 rounded-2xl border border-slate-800">
             <div>
                 <label class="text-xs text-slate-400 font-bold uppercase">Class Level</label>
@@ -418,29 +472,16 @@ def index():
             </div>
         </div>
 
-        <!-- VIEW 2: MULTI-USER REAL-TIME VIDEO CLASSROOM (PERMANENT & UNLIMITED) -->
+        <!-- VIEW 2: CLASS-WISE SEPARATE UNLIMITED CLASSROOM -->
         <div id="view-live" class="hidden flex-col space-y-4">
-            <div class="flex flex-wrap justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl gap-3">
+            <div class="flex flex-wrap justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-2xl gap-2">
                 <div>
                     <h3 id="live-header" class="text-lg font-black text-emerald-400">Classroom Live Broadcaster</h3>
-                    <p class="text-xs text-slate-400">Multi-Peer Video Mesh • Continuous Session • Direct browser access</p>
+                    <p id="live-desc" class="text-xs text-slate-400">Class-dedicated room • 50-60 Students • Direct in-app display</p>
                 </div>
-                <div class="flex space-x-2">
-                    <button onclick="startMyStream()" id="btn-stream" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-2 rounded-xl font-bold">🟢 Join / Turn On Cam</button>
-                    <button onclick="toggleMyMic()" id="btn-mic" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-4 py-2 rounded-xl font-bold">🎤 Mic Muted</button>
-                </div>
+                <button onclick="reloadClassroomFrame()" class="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-xl border border-slate-700">🔄 Reload Stream</button>
             </div>
-
-            <!-- Multi-User Video Grid -->
-            <div id="video-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-slate-950 p-4 rounded-3xl border border-slate-800 min-h-[500px]">
-                <!-- Local User Card -->
-                <div id="local-box" class="video-box relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 h-64 flex items-center justify-center">
-                    <video id="my-video" autoplay playsinline muted></video>
-                    <div class="absolute bottom-3 left-3 bg-slate-950/80 px-3 py-1 rounded-lg text-xs font-bold text-amber-400 border border-slate-700">
-                        👨‍🏫 <span id="my-tag">My Stream (Click Join)</span>
-                    </div>
-                </div>
-            </div>
+            <iframe id="classroom-frame" class="w-full h-[660px] rounded-3xl border border-slate-800 bg-slate-950" allow="camera; microphone; fullscreen; display-capture"></iframe>
         </div>
 
         <!-- VIEW 3: AI TUTOR -->
@@ -456,7 +497,23 @@ def index():
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
                 <h3 class="text-xl font-black text-amber-400">Control Hub (Permanent Storage)</h3>
-                <p class="text-xs text-slate-400 mt-1">Users added here are saved permanently in PostgreSQL.</p>
+                <p class="text-xs text-slate-400 mt-1">Manage dedicated rooms for each class individually.</p>
+            </div>
+
+            <!-- Class-wise Dedicated Room Link Configuration -->
+            <div class="bg-slate-800/40 border border-slate-800 p-4 rounded-2xl space-y-3">
+                <h4 class="font-bold text-sm text-emerald-400">🎥 Class-Specific Classroom Link (Daily.co)</h4>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <select id="cfg-cls" onchange="fetchCurrentRoomUrl()" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
+                        <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
+                        <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
+                        <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
+                        <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
+                        <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
+                    </select>
+                    <input id="cfg-room-url" type="text" placeholder="Paste Dedicated Room URL (e.g. https://kuniya.daily.co/class10)" class="sm:col-span-2 bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                </div>
+                <button onclick="saveClassroomLink()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-xl text-sm">Save Link For Selected Class</button>
             </div>
 
             <div id="admin-user-sec" class="hidden space-y-3">
@@ -513,12 +570,6 @@ def index():
         let currentStep = 1;
         const prizeLadder = [1000, 5000, 10000, 160000, 320000, 640000, 1250000, 2500000, 5000000, 10000000];
 
-        // WebRTC Multi-Peer Mesh Logic
-        let peer = null;
-        let myStream = null;
-        let peersConnected = {};
-        let isMicOn = false;
-
         const subjectMatrix = {
             "Class 10 (SSLC)": {
                 "Malayalam Medium": ["ഗണിതം (Mathematics)", "ഭൗതികശാസ്ത്രം (Physics)", "രസതന്ത്രം (Chemistry)", "ജീവശാസ്ത്രം (Biology)"],
@@ -553,7 +604,7 @@ def index():
                 opt.value = i; opt.innerText = i; s.appendChild(opt);
             });
             resetKBC();
-            document.getElementById('live-header').innerText = `${c} • In-App Live Classroom`;
+            updateClassroomFrame();
         }
 
         async function handleLogin(e) {
@@ -574,7 +625,6 @@ def index():
                     document.getElementById('main-panel').classList.remove('hidden');
                     document.getElementById('main-panel').classList.add('flex');
                     document.getElementById('usr-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
-                    document.getElementById('my-tag').innerText = `${me.name} (Me)`;
                     document.getElementById('score-tag').innerText = `🏆 ${me.score.toLocaleString()} Pts`;
                     
                     if(me.role === 'student') {
@@ -607,8 +657,6 @@ def index():
         }
 
         function handleLogout() {
-            if (myStream) myStream.getTracks().forEach(t => t.stop());
-            if (peer) peer.destroy();
             me = null;
             staffAuth = { u: '', p: '' };
             clearInterval(timer);
@@ -623,72 +671,51 @@ def index():
             document.getElementById('notice-display').innerText = `📢 Official Announcement: ${d.notice}`;
         }
 
-        // --- MULTI-USER WEBRTC (CONNECT ALL STUDENTS TO TEACHER & PEERS) ---
-        async function startMyStream() {
-            const btn = document.getElementById('btn-stream');
-            try {
-                myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                document.getElementById('my-video').srcObject = myStream;
-                btn.innerText = "🟢 Stream Active";
-                btn.className = "bg-emerald-700 text-white text-xs px-4 py-2 rounded-xl font-bold cursor-default";
-
-                // Initialize PeerJS mesh room
-                const cls = document.getElementById('sel-class').value.replace(/[^a-zA-Z0-9]/g, '');
-                const myPeerId = `KUNIYA_${cls}_${me.username}_${Math.floor(Math.random()*1000)}`;
-
-                peer = new Peer(myPeerId);
-
-                peer.on('open', (id) => {
-                    console.log("Connected to WebRTC Mesh with ID: ", id);
-                });
-
-                // When someone calls us, answer with our stream
-                peer.on('call', (call) => {
-                    call.answer(myStream);
-                    call.on('stream', (remoteStream) => {
-                        addRemoteVideo(call.peer, remoteStream);
-                    });
-                });
-
-            } catch (e) {
-                alert("Camera/Mic Permission Required: " + e.message);
-            }
+        // ക്ലാസ് റൂം ലിങ്ക് അതാത് ക്ലാസിലേക്ക് മാത്രമായി ഫെച്ച് ചെയ്യുന്നു
+        async function updateClassroomFrame() {
+            const targetClass = document.getElementById('sel-class').value;
+            document.getElementById('live-header').innerText = `${targetClass} • Live Classroom`;
+            document.getElementById('live-desc').innerText = `Dedicated live room for ${targetClass}. Students join automatically.`;
+            const r = await fetch(`/api/classroom-room?target_class=${encodeURIComponent(targetClass)}`);
+            const d = await r.json();
+            const frame = document.getElementById('classroom-frame');
+            frame.src = d.room_url;
         }
 
-        function addRemoteVideo(peerId, stream) {
-            if (document.getElementById(`video-${peerId}`)) return;
-
-            const grid = document.getElementById('video-grid');
-            const box = document.createElement('div');
-            box.id = `video-${peerId}`;
-            box.className = "video-box relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 h-64 flex items-center justify-center";
-
-            const vid = document.createElement('video');
-            vid.srcObject = stream;
-            vid.autoplay = true;
-            vid.playsInline = true;
-
-            const tag = document.createElement('div');
-            tag.className = "absolute bottom-3 left-3 bg-slate-950/80 px-3 py-1 rounded-lg text-xs font-bold text-emerald-400 border border-slate-700";
-            tag.innerText = `🎓 Student Stream`;
-
-            box.appendChild(vid);
-            box.appendChild(tag);
-            grid.appendChild(box);
+        function reloadClassroomFrame() {
+            updateClassroomFrame();
         }
 
-        function toggleMyMic() {
-            const btn = document.getElementById('btn-mic');
-            if (myStream && myStream.getAudioTracks().length > 0) {
-                isMicOn = !isMicOn;
-                myStream.getAudioTracks()[0].enabled = isMicOn;
+        async function fetchCurrentRoomUrl() {
+            const targetClass = document.getElementById('cfg-cls').value;
+            const r = await fetch(`/api/classroom-room?target_class=${encodeURIComponent(targetClass)}`);
+            const d = await r.json();
+            document.getElementById('cfg-room-url').value = d.room_url;
+        }
+
+        async function saveClassroomLink() {
+            const targetClass = document.getElementById('cfg-cls').value;
+            const url = document.getElementById('cfg-room-url').value;
+            if(!url) {
+                alert("Please paste your room URL.");
+                return;
             }
-            if (isMicOn) {
-                btn.innerText = "🎙 Mic Active";
-                btn.className = "bg-emerald-600 text-white text-xs px-4 py-2 rounded-xl font-bold";
+            const r = await fetch('/api/classroom-room', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    auth_user: staffAuth.u,
+                    auth_pass: staffAuth.p,
+                    target_class: targetClass,
+                    room_url: url
+                })
+            });
+            if(r.ok) {
+                alert(`Classroom URL updated for ${targetClass}!`);
+                updateClassroomFrame();
             } else {
-                btn.innerText = "🎤 Mic Muted";
-                btn.className = "bg-slate-700 text-white text-xs px-4 py-2 rounded-xl font-bold";
+                const d = await r.json();
+                alert(d.detail);
             }
         }
 
@@ -915,6 +942,7 @@ def index():
             });
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             document.getElementById(`tb-${tabId}`).className = "px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black";
+            if(tabId === 'live') updateClassroomFrame();
         }
     </script>
 </body>
