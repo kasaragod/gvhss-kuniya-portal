@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import re
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -78,7 +79,7 @@ def init_db():
             c.execute("INSERT OR IGNORE INTO users VALUES ('student2', 'student123', 'Fathima N', 'student', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
             c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live for 10th, +1, and +2.')")
             
-        # Default Meet Links for Classes
+        # Default Meet Links
         classes = ["Class 10 (SSLC)", "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus Two (+2 Science)", "Plus Two (+2 Commerce)"]
         for cls in classes:
             c.execute("INSERT OR IGNORE INTO live_links VALUES (?, ?, ?)", (cls, "https://meet.google.com/", "Admin"))
@@ -91,7 +92,7 @@ def init_db():
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 2, "What is the 10th term of the sequence: 3, 7, 11, 15...?", "35", "39", "41", "43", 1, "x_n = 4n - 1. x_10 = 4(10) - 1 = 39."),
                 ("Class 10 (SSLC)", "Mathematics", "English Medium", 3, "What is the angle subtended in a semicircle?", "45°", "60°", "90°", "180°", 2, "Angle in a semicircle is always a right angle (90°)."),
                 ("Class 10 (SSLC)", "Physics", "English Medium", 1, "What is the SI unit of electric resistance?", "Volt", "Ohm", "Ampere", "Watt", 1, "Resistance is measured in Ohms (Ω)."),
-                ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating effect: H = I²Rt?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's Law of Heating states heat produced is H = I²Rt."),
+                ("Class 10 (SSLC)", "Physics", "English Medium", 2, "Which law explains heating effect: H = I^2 * R * t?", "Ohm's Law", "Joule's Law", "Faraday's Law", "Lenz's Law", 1, "Joule's Law of Heating states heat produced is H = I^2 * R * t."),
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 1, "5, 9, 13, 17... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്ര?", "2", "3", "4", "5", 2, "പൊതുവ്യത്യാസം d = 9 - 5 = 4."),
                 ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", 2, "ഒരു അർദ്ധവൃത്തത്തിലെ കോണിന്റെ അളവ് എത്ര?", "45°", "60°", "90°", "180°", 2, "അർദ്ധവൃത്തത്തിലെ കോൺ എപ്പോഴും 90 ഡിഗ്രി (മട്ടക്കോൺ) ആണ്."),
                 ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", 1, "വൈദ്യുത പ്രതിരോധത്തിന്റെ SI യൂണിറ്റ് ഏത്?", "വോൾട്ട്", "ഓം", "ആമ്പിയർ", "വാട്ട്", 1, "പ്രതിരോധം ഓം (Ohm) ൽ അളക്കുന്നു."),
@@ -104,6 +105,19 @@ def init_db():
         conn.commit()
 
 init_db()
+
+# ----------------- CLEAN PLAIN TEXT FORMATTER -----------------
+def sanitize_ai_output(text: str) -> str:
+    # Strip markdown math and LaTeX delimiters
+    text = text.replace("$$", "").replace("$", "")
+    text = re.sub(r"\\\[(.*?)\\\]", r"\1", text)
+    text = re.sub(r"\\\((.*?)\\\)", r"\1", text)
+    text = re.sub(r"\\text\{([^}]*)\}", r"\1", text)
+    text = re.sub(r"\\frac\{([^}]*)\}\{([^}]*)\}", r"(\1 / \2)", text)
+    text = text.replace(r"\times", "×").replace(r"\div", "÷").replace(r"\dots", "...")
+    # Clean unwanted asterisks and hashes
+    text = text.replace("**", "").replace("###", "").replace("##", "")
+    return text.strip()
 
 # ----------------- SCHEMAS -----------------
 class LoginReq(BaseModel):
@@ -150,7 +164,7 @@ def verify_staff(c, u, p):
     c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
     row = c.fetchone()
     if not row or row["role"] not in ["admin", "teacher"]:
-        raise HTTPException(status_code=403, detail="Permission Denied: Staff or Administrator access required.")
+        raise HTTPException(status_code=403, detail="Permission Denied: Staff access required.")
     return row["role"]
 
 def verify_admin(c, u, p):
@@ -213,7 +227,7 @@ def get_live_link(target_class: str):
 def set_live_link(req: MeetUpdateReq):
     with get_db() as conn:
         c = conn.cursor()
-        role = verify_staff(c, req.auth_user, req.auth_pass)
+        verify_staff(c, req.auth_user, req.auth_pass)
         clean_url = req.meet_url.strip()
         if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
             clean_url = "https://" + clean_url
@@ -276,29 +290,28 @@ def ask_doubt(req: DoubtReq):
         return {"answer": "AI key is not configured in Koyeb environment variables."}
     
     prompt = f"""
-    You are an expert Kerala SCERT teacher for GVHSS KUNIYA.
+    You are an expert Kerala SCERT textbook teacher for GVHSS KUNIYA school.
     Class: {req.student_class}
     Subject: {req.subject}
     Medium: {req.medium}
 
-    Instructions:
-    1. Base your explanation strictly on the Kerala SCERT syllabus textbook.
-    2. If Medium is 'Malayalam Medium', reply strictly in clear and standard Malayalam.
-    3. If Medium is 'English Medium', reply in concise English.
-    4. Provide:
-       - Concept Overview
-       - Step-by-Step Textbook Solution / Formula
-       - Exam Blueprint Tip
+    Formatting and Syntax Rules (STRICT):
+    1. Do NOT use LaTeX or any dollar signs ($ or $$).
+    2. Do NOT use markdown bold stars (**) or headers (###).
+    3. Write all mathematical steps, equations, and expressions using standard plain text and readable symbols only (e.g. x10, S20, +, -, *, /, =, sqrt()).
+    4. If Medium is 'Malayalam Medium', explain in clear, natural Malayalam.
+    5. If Medium is 'English Medium', explain in direct, student-friendly English.
+    6. Provide a concise, step-by-step solution matching the Kerala SCERT textbook standard.
 
     Question: {req.query}
     """
     try:
         res = ai_client.models.generate_content(model=PRIMARY_MODEL, contents=prompt)
-        return {"answer": res.text}
+        return {"answer": sanitize_ai_output(res.text)}
     except Exception:
         try:
             res = ai_client.models.generate_content(model=BACKUP_MODEL, contents=prompt)
-            return {"answer": res.text}
+            return {"answer": sanitize_ai_output(res.text)}
         except Exception as e:
             return {"answer": f"Tutor engine error: {str(e)}"}
 
@@ -426,6 +439,7 @@ def index():
                 <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question (അടുത്ത ചോദ്യം)</button>
             </div>
 
+            <!-- Ladder -->
             <div class="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-1.5 text-xs font-bold">
                 <div class="text-slate-400 uppercase tracking-wider text-[11px] mb-3 text-center">Score Progress Ladder</div>
                 <div id="ladder-10" class="flex justify-between p-2 rounded-lg bg-slate-800/40 text-amber-300"><span>10. Jackpot</span><span>1,00,00,000 Pts</span></div>
@@ -461,7 +475,7 @@ def index():
         <!-- VIEW 3: AI SCERT TUTOR -->
         <div id="view-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4">
             <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT Deep Learning Tutor</h3>
-            <p class="text-xs text-slate-400">Explanations strictly based on your enrolled syllabus blueprint.</p>
+            <p class="text-xs text-slate-400">Explanations in clean, readable text without code or formula clutter.</p>
             <textarea id="tutor-in" placeholder="Ask your textbook doubt..." class="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-white text-sm h-32 focus:outline-none focus:border-amber-400"></textarea>
             <button onclick="requestDoubtSolution()" class="bg-amber-500 hover:bg-amber-400 text-black font-black px-6 py-3 rounded-xl shadow-md">Solve Textbook Doubt</button>
             <div id="tutor-out" class="text-slate-200 text-sm leading-relaxed whitespace-pre-line bg-slate-800/80 p-5 rounded-2xl border border-slate-700 hidden"></div>
@@ -474,7 +488,7 @@ def index():
                 <p class="text-xs text-slate-400 mt-1">Manage Google Meet classrooms, school notices, and student registrations.</p>
             </div>
 
-            <!-- Google Meet Link Updater (For Teacher & Admin) -->
+            <!-- Google Meet Link Updater -->
             <div class="bg-slate-800/40 border border-slate-800 p-4 rounded-2xl space-y-3">
                 <h4 class="font-bold text-sm text-emerald-400">🎥 Update Google Meet Link for Class</h4>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
