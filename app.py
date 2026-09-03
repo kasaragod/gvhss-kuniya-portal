@@ -14,7 +14,6 @@ st.set_page_config(
 )
 
 # ----------------- GEMINI MODEL CONFIGURATION -----------------
-# 404 Error പരിഹരിക്കാൻ ഏറ്റവും പുതിയ മോഡൽ നൽകിയിരിക്കുന്നു
 GEMINI_MODEL = "gemini-2.0-flash"
 
 # ----------------- KBC THEME STYLING -----------------
@@ -211,8 +210,8 @@ def init_db():
                   ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium', 0))
         c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
                   ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0))
-        c.execute('INSERT INTO notices (notice_text) VALUES (?)', 
-                  ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.',))
+        c.execute('INSERT INTO notices (notice_text) VALUES (?, ?)', 
+                  ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.', '2026-09-04'))
 
     conn.commit()
     conn.close()
@@ -525,7 +524,10 @@ if st.session_state["role"] == "admin":
                 if st.form_submit_button("Save Account", use_container_width=True):
                     if new_uid and new_pwd and new_name:
                         ok, msg = add_user(new_uid, new_pwd, new_name, new_role, new_cls, new_med)
-                        st.success(msg) if ok else st.error(msg)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
                     else:
                         st.warning("Please fill in all fields.")
         with adm2:
@@ -685,8 +687,11 @@ with tab_doubt:
                 Language Requirement: {lang_target}
                 Question: {user_q}
                 """
-                res = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-                st.markdown(res.text)
+                try:
+                    res = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+                    st.markdown(res.text)
+                except Exception as e:
+                    st.error(f"Error fetching response: {e}")
         elif not client:
             st.warning("Please configure GEMINI_API_KEY to enable AI Tutoring.")
 
@@ -701,10 +706,13 @@ with tab_img:
             if client:
                 with st.spinner("Processing image..."):
                     lang_target = "Solve in clear Malayalam." if "Malayalam" in selected_medium else "Solve in English."
-                    res = client.models.generate_content(
-                        model=GEMINI_MODEL,
-                        contents=[f"Class: {selected_class}, Subject: {subject}, Chapter: {selected_chapter}, Medium: {selected_medium}. {lang_target} Solve this textbook problem step-by-step.", img]
-                    )
-                    st.markdown(res.text)
+                    try:
+                        res = client.models.generate_content(
+                            model=GEMINI_MODEL,
+                            contents=[f"Class: {selected_class}, Subject: {subject}, Chapter: {selected_chapter}, Medium: {selected_medium}. {lang_target} Solve this textbook problem step-by-step.", img]
+                        )
+                        st.markdown(res.text)
+                    except Exception as e:
+                        st.error(f"Error processing image: {e}")
             else:
                 st.warning("Please configure GEMINI_API_KEY.")
