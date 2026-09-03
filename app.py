@@ -161,202 +161,187 @@ def get_chapters_for_selection(cls_name, subj_name):
         return SCERT_CHAPTERS[key]
     return ["All Chapters (എല്ലാ പാഠങ്ങളും)", "Unit 1", "Unit 2", "Unit 3", "Unit 4"]
 
-# ----------------- DATABASE MANAGEMENT -----------------
+# ----------------- DATABASE MANAGEMENT (CONCURRENCY SAFE) -----------------
 DB_FILE = "kuniya_portal.db"
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL,
-            student_class TEXT,
-            medium TEXT DEFAULT 'Malayalam Medium',
-            score INTEGER DEFAULT 0
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS notices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            notice_text TEXT NOT NULL,
-            posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS kbc_questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            target_class TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            chapter TEXT NOT NULL DEFAULT 'All Chapters',
-            medium TEXT NOT NULL,
-            question TEXT NOT NULL,
-            opt_a TEXT NOT NULL,
-            opt_b TEXT NOT NULL,
-            opt_c TEXT NOT NULL,
-            opt_d TEXT NOT NULL,
-            correct_idx INTEGER NOT NULL,
-            explanation TEXT NOT NULL
-        )
-    ''')
-    
-    c.execute('SELECT * FROM users WHERE username = ?', ('admin',))
-    if not c.fetchone():
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                  ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0))
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                  ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium', 0))
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                  ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0))
-        c.execute('INSERT INTO notices (notice_text) VALUES (?, ?)', 
-                  ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.', '2026-09-04'))
+def get_connection():
+    # 30 സെക്കൻഡ് timeout കൊടുക്കുന്നതിലൂടെ database lock എറർ ഒഴിവാകുന്നു
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")  # Read & Write ഒരേസമയം സാധ്യമാക്കുന്നു
+    return conn
 
-    conn.commit()
-    conn.close()
+def init_db():
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                student_class TEXT,
+                medium TEXT DEFAULT 'Malayalam Medium',
+                score INTEGER DEFAULT 0
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS notices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                notice_text TEXT NOT NULL,
+                posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS kbc_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_class TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                chapter TEXT NOT NULL DEFAULT 'All Chapters',
+                medium TEXT NOT NULL,
+                question TEXT NOT NULL,
+                opt_a TEXT NOT NULL,
+                opt_b TEXT NOT NULL,
+                opt_c TEXT NOT NULL,
+                opt_d TEXT NOT NULL,
+                correct_idx INTEGER NOT NULL,
+                explanation TEXT NOT NULL
+            )
+        ''')
+        
+        c.execute('SELECT username FROM users WHERE username = ?', ('admin',))
+        if not c.fetchone():
+            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                      ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'None', 'Malayalam Medium', 0))
+            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                      ('teacher1', 'teacher123', 'Suresh Sir (Dept. of Maths)', 'teacher', 'None', 'Malayalam Medium', 0))
+            c.execute('INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                      ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0))
+            c.execute('INSERT INTO notices (notice_text) VALUES (?)', 
+                      ('Welcome to the official digital campus portal of GVHSS KUNIYA, Kasaragod.',))
 
 init_db()
 
 def get_user(username):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ?', (username,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return {"username": row[0], "password": row[1], "name": row[2], "role": row[3], "class": row[4], "medium": row[5], "score": row[6] or 0}
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ?', (username,))
+        row = c.fetchone()
+        if row:
+            return {"username": row[0], "password": row[1], "name": row[2], "role": row[3], "class": row[4], "medium": row[5], "score": row[6] or 0}
     return None
 
 def update_user_score(username, points):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('UPDATE users SET score = score + ? WHERE username = ?', (points, username))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('UPDATE users SET score = score + ? WHERE username = ?', (points, username))
 
 def get_top_students():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT name, student_class, score FROM users WHERE role = "student" ORDER BY score DESC LIMIT 5')
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('SELECT name, student_class, score FROM users WHERE role = "student" ORDER BY score DESC LIMIT 5')
+        return c.fetchall()
 
 def get_all_users():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT username, name, role, student_class, score FROM users ORDER BY role, name')
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('SELECT username, name, role, student_class, score FROM users ORDER BY role, name')
+        return c.fetchall()
 
 def add_user(username, password, name, role, student_class, medium):
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', (username, password, name, role, student_class, medium, 0))
-        conn.commit()
-        conn.close()
+        with get_connection() as conn:
+            c = conn.cursor()
+            c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)', (username, password, name, role, student_class, medium, 0))
         return True, f"User '{username}' created successfully!"
     except sqlite3.IntegrityError:
         return False, "This Username already exists. Please choose a different one."
+    except Exception as e:
+        return False, f"Error: {e}"
 
 def delete_user(username):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('DELETE FROM users WHERE username = ?', (username,))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('DELETE FROM users WHERE username = ?', (username,))
 
 def set_latest_notice(text):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('INSERT INTO notices (notice_text) VALUES (?)', (text,))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('INSERT INTO notices (notice_text) VALUES (?)', (text,))
 
 def get_latest_notice():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1')
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else "Welcome to GVHSS KUNIYA Digital Campus."
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute('SELECT notice_text FROM notices ORDER BY id DESC LIMIT 1')
+        row = c.fetchone()
+        return row[0] if row else "Welcome to GVHSS KUNIYA Digital Campus."
 
 # ----------------- KBC ENGINE -----------------
 def fetch_kbc_question(target_class, subject, chapter, medium, exclude_ids=[]):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    placeholders = ','.join('?' for _ in exclude_ids) if exclude_ids else '0'
-    
-    if "All Chapters" not in chapter:
+    with get_connection() as conn:
+        c = conn.cursor()
+        placeholders = ','.join('?' for _ in exclude_ids) if exclude_ids else '0'
+        
+        if "All Chapters" not in chapter:
+            c.execute(f'''
+                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+                FROM kbc_questions 
+                WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ? AND id NOT IN ({placeholders})
+                ORDER BY RANDOM() LIMIT 1
+            ''', [target_class, subject, chapter, medium] + list(exclude_ids))
+            row = c.fetchone()
+            if row:
+                return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
+        
         c.execute(f'''
             SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
             FROM kbc_questions 
-            WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ? AND id NOT IN ({placeholders})
+            WHERE target_class = ? AND subject = ? AND medium = ? AND id NOT IN ({placeholders})
             ORDER BY RANDOM() LIMIT 1
-        ''', [target_class, subject, chapter, medium] + list(exclude_ids))
+        ''', [target_class, subject, medium] + list(exclude_ids))
         row = c.fetchone()
+        
+        if not row:
+            c.execute(f'''
+                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+                FROM kbc_questions 
+                WHERE medium = ? AND id NOT IN ({placeholders})
+                ORDER BY RANDOM() LIMIT 1
+            ''', [medium] + list(exclude_ids))
+            row = c.fetchone()
+            
+        if not row:
+            c.execute('''
+                SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
+                FROM kbc_questions 
+                WHERE medium = ? 
+                ORDER BY RANDOM() LIMIT 1
+            ''', (medium,))
+            row = c.fetchone()
+            
         if row:
-            conn.close()
             return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
-    
-    c.execute(f'''
-        SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-        FROM kbc_questions 
-        WHERE target_class = ? AND subject = ? AND medium = ? AND id NOT IN ({placeholders})
-        ORDER BY RANDOM() LIMIT 1
-    ''', [target_class, subject, medium] + list(exclude_ids))
-    row = c.fetchone()
-    
-    if not row:
-        c.execute(f'''
-            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-            FROM kbc_questions 
-            WHERE medium = ? AND id NOT IN ({placeholders})
-            ORDER BY RANDOM() LIMIT 1
-        ''', [medium] + list(exclude_ids))
-        row = c.fetchone()
-        
-    if not row:
-        c.execute('''
-            SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
-            FROM kbc_questions 
-            WHERE medium = ? 
-            ORDER BY RANDOM() LIMIT 1
-        ''', (medium,))
-        row = c.fetchone()
-        
-    conn.close()
-    if row:
-        return {"id": row[0], "question": row[1], "options": [row[2], row[3], row[4], row[5]], "correct_idx": row[6], "explanation": row[7]}
     return None
 
 def count_kbc_questions(target_class, subject, chapter, medium):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    if "All Chapters" not in chapter:
-        c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ?', (target_class, subject, chapter, medium))
-    else:
-        c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND medium = ?', (target_class, subject, medium))
-    cnt = c.fetchone()[0]
-    conn.close()
-    return cnt
+    with get_connection() as conn:
+        c = conn.cursor()
+        if "All Chapters" not in chapter:
+            c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND chapter = ? AND medium = ?', (target_class, subject, chapter, medium))
+        else:
+            c.execute('SELECT COUNT(*) FROM kbc_questions WHERE target_class = ? AND subject = ? AND medium = ?', (target_class, subject, medium))
+        return c.fetchone()[0]
 
 def insert_batch_kbc_questions(target_class, subject, chapter, medium, q_list):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    for q in q_list:
-        try:
-            c.execute('''
-                INSERT INTO kbc_questions (target_class, subject, chapter, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (target_class, subject, chapter, medium, q["q"], q["options"][0], q["options"][1], q["options"][2], q["options"][3], q["answer_idx"], q["exp"]))
-        except Exception:
-            continue
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        c = conn.cursor()
+        for q in q_list:
+            try:
+                c.execute('''
+                    INSERT INTO kbc_questions (target_class, subject, chapter, medium, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (target_class, subject, chapter, medium, q["q"], q["options"][0], q["options"][1], q["options"][2], q["options"][3], q["answer_idx"], q["exp"]))
+            except Exception:
+                continue
 
 def generate_ai_kbc_batch(client, target_class, subject, chapter, medium, count=10):
     lang_inst = "Generate questions and options strictly in standard Malayalam based on SCERT Kerala textbooks." if "Malayalam" in medium else "Generate questions and options in English based on SCERT Kerala textbooks."
