@@ -46,6 +46,13 @@ def init_db():
             );
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS live_links (
+                target_class TEXT PRIMARY KEY,
+                meet_url TEXT NOT NULL,
+                updated_by TEXT NOT NULL
+            );
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS questions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 target_class TEXT NOT NULL,
@@ -62,13 +69,21 @@ def init_db():
             );
         """)
         
+        # Default Accounts
         c.execute("SELECT username FROM users WHERE username = 'admin'")
         if not c.fetchone():
             c.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin@kuniya', 'Principal / Administrator', 'admin', 'All', 'All', 0)")
+            c.execute("INSERT OR IGNORE INTO users VALUES ('teacher1', 'teacher123', 'Suresh Kumar (Maths)', 'teacher', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
             c.execute("INSERT OR IGNORE INTO users VALUES ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'English Medium', 0)")
             c.execute("INSERT OR IGNORE INTO users VALUES ('student2', 'student123', 'Fathima N', 'student', 'Class 10 (SSLC)', 'Malayalam Medium', 0)")
             c.execute("INSERT INTO notices (notice_text) VALUES ('GVHSS KUNIYA Smart Portal is officially live for 10th, +1, and +2.')")
             
+        # Default Meet Links for Classes
+        classes = ["Class 10 (SSLC)", "Plus One (+1 Science)", "Plus One (+1 Commerce)", "Plus Two (+2 Science)", "Plus Two (+2 Commerce)"]
+        for cls in classes:
+            c.execute("INSERT OR IGNORE INTO live_links VALUES (?, ?, ?)", (cls, "https://meet.google.com/", "Admin"))
+            
+        # Seed questions
         c.execute("SELECT COUNT(*) FROM questions")
         if c.fetchone()[0] == 0:
             sample_qs = [
@@ -96,8 +111,8 @@ class LoginReq(BaseModel):
     password: str
 
 class UserAddReq(BaseModel):
-    admin_user: str
-    admin_pass: str
+    auth_user: str
+    auth_pass: str
     username: str
     password: str
     name: str
@@ -105,9 +120,15 @@ class UserAddReq(BaseModel):
     student_class: str
     medium: str
 
-class DeleteUserReq(BaseModel):
-    admin_user: str
-    admin_pass: str
+class AuthActionReq(BaseModel):
+    auth_user: str
+    auth_pass: str
+
+class MeetUpdateReq(BaseModel):
+    auth_user: str
+    auth_pass: str
+    target_class: str
+    meet_url: str
 
 class ScoreUpdateReq(BaseModel):
     username: str
@@ -120,36 +141,39 @@ class DoubtReq(BaseModel):
     query: str
 
 class NoticeReq(BaseModel):
-    admin_user: str
-    admin_pass: str
+    auth_user: str
+    auth_pass: str
     notice_text: str
 
 # ----------------- API ROUTES -----------------
-@app.post("/api/login")
-def login(req: LoginReq):
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT username, password, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?", (req.username.strip().lower(), req.password.strip()))
-        user = c.fetchone()
-        if user:
-            u_dict = dict(user)
-            # പാസ്‌വേഡ് റെസ്‌പോൺസിൽ നിന്ന് ഒഴിവാക്കുന്നു
-            del u_dict["password"]
-            return {"status": "ok", "user": u_dict}
-        raise HTTPException(status_code=401, detail="Invalid User ID or Password")
+def verify_staff(c, u, p):
+    c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
+    row = c.fetchone()
+    if not row or row["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Permission Denied: Staff or Administrator access required.")
+    return row["role"]
 
-# അഡ്മിൻ മാത്രം ആക്സസ് ചെയ്യാനുള്ള റോൾ വെരിഫിക്കേഷൻ
 def verify_admin(c, u, p):
     c.execute("SELECT role FROM users WHERE username = ? AND password = ?", (u.strip().lower(), p.strip()))
     row = c.fetchone()
     if not row or row["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Access Denied: Only Administrator can perform this action.")
+        raise HTTPException(status_code=403, detail="Permission Denied: Only Administrator can perform this action.")
 
-@app.get("/api/users")
-def get_users(admin_user: str, admin_pass: str):
+@app.post("/api/login")
+def login(req: LoginReq):
     with get_db() as conn:
         c = conn.cursor()
-        verify_admin(c, admin_user, admin_pass)
+        c.execute("SELECT username, name, role, student_class, medium, score FROM users WHERE username = ? AND password = ?", (req.username.strip().lower(), req.password.strip()))
+        user = c.fetchone()
+        if user:
+            return {"status": "ok", "user": dict(user)}
+        raise HTTPException(status_code=401, detail="Invalid User ID or Password")
+
+@app.get("/api/users")
+def get_users(auth_user: str, auth_pass: str):
+    with get_db() as conn:
+        c = conn.cursor()
+        verify_admin(c, auth_user, auth_pass)
         c.execute("SELECT username, name, role, student_class, medium, score FROM users ORDER BY role, name")
         return {"users": [dict(r) for r in c.fetchall()]}
 
@@ -157,7 +181,7 @@ def get_users(admin_user: str, admin_pass: str):
 def add_user(req: UserAddReq):
     with get_db() as conn:
         c = conn.cursor()
-        verify_admin(c, req.admin_user, req.admin_pass)
+        verify_admin(c, req.auth_user, req.auth_pass)
         try:
             c.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, 0)", 
                       (req.username.strip().lower(), req.password.strip(), req.name.strip(), req.role, req.student_class, req.medium))
@@ -167,15 +191,36 @@ def add_user(req: UserAddReq):
             raise HTTPException(status_code=400, detail="Username already exists")
 
 @app.post("/api/users/delete/{username}")
-def delete_user(username: str, req: DeleteUserReq):
+def delete_user(username: str, req: AuthActionReq):
     if username == "admin":
         raise HTTPException(status_code=400, detail="Default admin cannot be removed")
     with get_db() as conn:
         c = conn.cursor()
-        verify_admin(c, req.admin_user, req.admin_pass)
+        verify_admin(c, req.auth_user, req.auth_pass)
         c.execute("DELETE FROM users WHERE username = ?", (username,))
         conn.commit()
         return {"status": "ok"}
+
+@app.get("/api/live-link")
+def get_live_link(target_class: str):
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT meet_url, updated_by FROM live_links WHERE target_class = ?", (target_class,))
+        row = c.fetchone()
+        return {"meet_url": row["meet_url"] if row else "https://meet.google.com/", "updated_by": row["updated_by"] if row else "Admin"}
+
+@app.post("/api/live-link")
+def set_live_link(req: MeetUpdateReq):
+    with get_db() as conn:
+        c = conn.cursor()
+        role = verify_staff(c, req.auth_user, req.auth_pass)
+        clean_url = req.meet_url.strip()
+        if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+            clean_url = "https://" + clean_url
+        c.execute("INSERT OR REPLACE INTO live_links (target_class, meet_url, updated_by) VALUES (?, ?, ?)", 
+                  (req.target_class, clean_url, req.auth_user))
+        conn.commit()
+        return {"status": "ok", "meet_url": clean_url}
 
 @app.get("/api/notice")
 def get_notice():
@@ -189,7 +234,7 @@ def get_notice():
 def set_notice(req: NoticeReq):
     with get_db() as conn:
         c = conn.cursor()
-        verify_admin(c, req.admin_user, req.admin_pass)
+        verify_staff(c, req.auth_user, req.auth_pass)
         c.execute("INSERT INTO notices (notice_text) VALUES (?)", (req.notice_text.strip(),))
         conn.commit()
         return {"status": "ok"}
@@ -346,9 +391,9 @@ def index():
         <!-- Navigation Tabs -->
         <div class="flex space-x-2 border-b border-slate-800 pb-2">
             <button onclick="nav('kbc')" id="tb-kbc" class="px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black">🏆 KBC Arena</button>
+            <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 Live Classroom (Meet)</button>
             <button onclick="nav('tutor')" id="tb-tutor" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🤖 SCERT AI Tutor</button>
-            <button onclick="nav('live')" id="tb-live" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white">🎥 Live Classroom</button>
-            <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Admin Control</button>
+            <button onclick="nav('admin')" id="tb-admin" class="px-5 py-2.5 font-bold text-sm rounded-xl text-slate-400 hover:text-white hidden">⚙️ Control Panel</button>
         </div>
 
         <!-- VIEW 1: KBC ARENA -->
@@ -381,7 +426,6 @@ def index():
                 <button onclick="advanceKBC()" id="btn-next" class="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-2xl shadow-xl hidden">👉 Next Question (അടുത്ത ചോദ്യം)</button>
             </div>
 
-            <!-- Ladder -->
             <div class="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-1.5 text-xs font-bold">
                 <div class="text-slate-400 uppercase tracking-wider text-[11px] mb-3 text-center">Score Progress Ladder</div>
                 <div id="ladder-10" class="flex justify-between p-2 rounded-lg bg-slate-800/40 text-amber-300"><span>10. Jackpot</span><span>1,00,00,000 Pts</span></div>
@@ -397,7 +441,24 @@ def index():
             </div>
         </div>
 
-        <!-- VIEW 2: AI SCERT TUTOR -->
+        <!-- VIEW 2: LIVE CLASSROOM (GOOGLE MEET) -->
+        <div id="view-live" class="hidden bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center space-y-6">
+            <div class="max-w-xl mx-auto space-y-3">
+                <div class="inline-flex p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400">
+                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                </div>
+                <h3 id="live-class-header" class="text-2xl font-black text-white">Live Classroom</h3>
+                <p id="live-class-sub" class="text-slate-400 text-sm">Join the official high-speed Google Meet session for your registered batch.</p>
+                <div class="pt-4">
+                    <a id="btn-join-meet" href="https://meet.google.com/" target="_blank" class="inline-block w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg px-8 py-4 rounded-2xl shadow-xl transition transform hover:scale-105">
+                        🎥 Join Google Meet Session
+                    </a>
+                </div>
+                <p id="meet-updated-tag" class="text-xs text-slate-500 pt-2"></p>
+            </div>
+        </div>
+
+        <!-- VIEW 3: AI SCERT TUTOR -->
         <div id="view-tutor" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4">
             <h3 class="text-lg font-bold text-amber-400">🤖 Kerala SCERT Deep Learning Tutor</h3>
             <p class="text-xs text-slate-400">Explanations strictly based on your enrolled syllabus blueprint.</p>
@@ -406,51 +467,66 @@ def index():
             <div id="tutor-out" class="text-slate-200 text-sm leading-relaxed whitespace-pre-line bg-slate-800/80 p-5 rounded-2xl border border-slate-700 hidden"></div>
         </div>
 
-        <!-- VIEW 3: LIVE CLASSROOM -->
-        <div id="view-live" class="hidden">
-            <iframe id="jitsi-stage" src="" class="w-full h-[620px] rounded-3xl border border-slate-800" allow="camera; microphone; fullscreen; display-capture"></iframe>
-        </div>
-
-        <!-- VIEW 4: ADMIN CONSOLE (ONLY FOR ROLE: ADMIN) -->
+        <!-- VIEW 4: ADMIN & TEACHER CONTROL PANEL -->
         <div id="view-admin" class="hidden bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-6">
             <div class="border-b border-slate-800 pb-4">
-                <h3 class="text-xl font-black text-amber-400">Administrative Control Hub</h3>
-                <p class="text-xs text-slate-400 mt-1">Enroll students with specific Class and Medium. Data is stored permanently.</p>
+                <h3 class="text-xl font-black text-amber-400">Control Hub</h3>
+                <p class="text-xs text-slate-400 mt-1">Manage Google Meet classrooms, school notices, and student registrations.</p>
             </div>
 
-            <!-- Add User Form with Class & Medium Selection -->
-            <form onsubmit="createUser(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input id="new-u" type="text" placeholder="Username / Student ID" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
-                <input id="new-p" type="password" placeholder="Password" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
-                <input id="new-name" type="text" placeholder="Full Student/Staff Name" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
-                
-                <select id="new-role" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                    <option value="student">Student</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="admin">Administrator</option>
-                </select>
-                
-                <select id="new-cls" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                    <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
-                    <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
-                    <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
-                    <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
-                    <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
-                </select>
-                
-                <select id="new-med" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
-                    <option value="English Medium">English Medium</option>
-                    <option value="Malayalam Medium">Malayalam Medium</option>
-                </select>
-                
-                <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Enroll & Register Account</button>
-            </form>
-
-            <div>
-                <h4 class="font-bold text-sm text-slate-300 mb-3">Enrolled Student & Staff Directory</h4>
-                <div id="user-table" class="space-y-2 max-h-72 overflow-y-auto pr-2"></div>
+            <!-- Google Meet Link Updater (For Teacher & Admin) -->
+            <div class="bg-slate-800/40 border border-slate-800 p-4 rounded-2xl space-y-3">
+                <h4 class="font-bold text-sm text-emerald-400">🎥 Update Google Meet Link for Class</h4>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <select id="meet-cls" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
+                        <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
+                        <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
+                        <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
+                        <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
+                        <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
+                    </select>
+                    <input id="meet-link-input" type="text" placeholder="Paste Google Meet Link (e.g. meet.google.com/abc-defg-hij)" class="sm:col-span-2 bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                </div>
+                <button onclick="saveMeetLink()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-xl text-sm">Save Meet Link</button>
             </div>
 
+            <!-- Add User Form (Admin Only) -->
+            <div id="admin-user-sec" class="hidden space-y-3 border-t border-slate-800 pt-4">
+                <h4 class="font-bold text-sm text-slate-300">Enroll New Student / Staff</h4>
+                <form onsubmit="createUser(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <input id="new-u" type="text" placeholder="Username / Student ID" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                    <input id="new-p" type="password" placeholder="Password" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                    <input id="new-name" type="text" placeholder="Full Name" required class="bg-slate-800 border border-slate-700 px-3.5 py-2.5 rounded-xl text-white text-sm">
+                    
+                    <select id="new-role" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
+                        <option value="student">Student</option>
+                        <option value="teacher">Teacher</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                    
+                    <select id="new-cls" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
+                        <option value="Class 10 (SSLC)">Class 10 (SSLC)</option>
+                        <option value="Plus One (+1 Science)">Plus One (+1 Science)</option>
+                        <option value="Plus One (+1 Commerce)">Plus One (+1 Commerce)</option>
+                        <option value="Plus Two (+2 Science)">Plus Two (+2 Science)</option>
+                        <option value="Plus Two (+2 Commerce)">Plus Two (+2 Commerce)</option>
+                    </select>
+                    
+                    <select id="new-med" class="bg-slate-800 border border-slate-700 text-white p-2.5 rounded-xl text-sm">
+                        <option value="English Medium">English Medium</option>
+                        <option value="Malayalam Medium">Malayalam Medium</option>
+                    </select>
+                    
+                    <button type="submit" class="sm:col-span-3 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl">Enroll & Register Account</button>
+                </form>
+
+                <div>
+                    <h4 class="font-bold text-sm text-slate-300 mt-4 mb-2">Enrolled Student & Staff Directory</h4>
+                    <div id="user-table" class="space-y-2 max-h-56 overflow-y-auto pr-2"></div>
+                </div>
+            </div>
+
+            <!-- Broadcast Notice -->
             <div class="border-t border-slate-800 pt-4">
                 <h4 class="font-bold text-sm text-slate-300 mb-2">Publish Notice</h4>
                 <div class="flex gap-2">
@@ -463,7 +539,7 @@ def index():
 
     <script>
         let me = null;
-        let adminAuth = { u: '', p: '' };
+        let staffAuth = { u: '', p: '' };
         let activeQ = null;
         let timer = null;
         let timeLeft = 30;
@@ -504,7 +580,7 @@ def index():
                 opt.value = i; opt.innerText = i; s.appendChild(opt);
             });
             resetKBC();
-            updateLiveFrame();
+            updateLiveMeetButton();
         }
 
         async function handleLogin(e) {
@@ -517,10 +593,8 @@ def index():
                 const d = await r.json();
                 if(r.ok) {
                     me = d.user;
-                    if(me.role === 'admin') {
-                        adminAuth = { u: u, p: p };
-                    } else {
-                        adminAuth = { u: '', p: '' };
+                    if(me.role === 'admin' || me.role === 'teacher') {
+                        staffAuth = { u: u, p: p };
                     }
 
                     document.getElementById('auth-panel').classList.add('hidden');
@@ -529,7 +603,6 @@ def index():
                     document.getElementById('usr-tag').innerText = `${me.name} (${me.role.toUpperCase()})`;
                     document.getElementById('score-tag').innerText = `🏆 ${me.score.toLocaleString()} Pts`;
                     
-                    // സെക്യൂരിറ്റി: സ്റ്റുഡന്റ് ആണെങ്കിൽ ക്ലാസ്സും മീഡിയവും ലോക്ക് ചെയ്യുക, അഡ്മിൻ ടാബ് ഒളിപ്പിക്കുക
                     if(me.role === 'student') {
                         document.getElementById('sel-class').value = me.student_class;
                         document.getElementById('sel-med').value = me.medium;
@@ -537,11 +610,16 @@ def index():
                         document.getElementById('sel-med').disabled = true;
                         document.getElementById('tb-admin').classList.add('hidden');
                         document.getElementById('view-admin').classList.add('hidden');
-                    } else if(me.role === 'admin') {
+                    } else {
                         document.getElementById('sel-class').disabled = false;
                         document.getElementById('sel-med').disabled = false;
                         document.getElementById('tb-admin').classList.remove('hidden');
-                        fetchUserDirectory();
+                        if(me.role === 'admin') {
+                            document.getElementById('admin-user-sec').classList.remove('hidden');
+                            fetchUserDirectory();
+                        } else {
+                            document.getElementById('admin-user-sec').classList.add('hidden');
+                        }
                     }
                     
                     syncClass();
@@ -556,7 +634,7 @@ def index():
 
         function handleLogout() {
             me = null;
-            adminAuth = { u: '', p: '' };
+            staffAuth = { u: '', p: '' };
             clearInterval(timer);
             document.getElementById('main-panel').classList.add('hidden');
             document.getElementById('main-panel').classList.remove('flex');
@@ -569,6 +647,43 @@ def index():
             const r = await fetch('/api/notice');
             const d = await r.json();
             document.getElementById('notice-display').innerText = `📢 Official Announcement: ${d.notice}`;
+        }
+
+        async function updateLiveMeetButton() {
+            const targetClass = document.getElementById('sel-class').value;
+            document.getElementById('live-class-header').innerText = `${targetClass} • Live Classroom`;
+            const r = await fetch(`/api/live-link?target_class=${encodeURIComponent(targetClass)}`);
+            const d = await r.json();
+            const btn = document.getElementById('btn-join-meet');
+            btn.href = d.meet_url;
+            document.getElementById('meet-updated-tag').innerText = `Current Link: ${d.meet_url} (Updated by: ${d.updated_by})`;
+        }
+
+        async function saveMeetLink() {
+            const targetClass = document.getElementById('meet-cls').value;
+            const meetUrl = document.getElementById('meet-link-input').value;
+            if(!meetUrl) {
+                alert("Please paste a valid Google Meet link.");
+                return;
+            }
+            const r = await fetch('/api/live-link', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    auth_user: staffAuth.u,
+                    auth_pass: staffAuth.p,
+                    target_class: targetClass,
+                    meet_url: meetUrl
+                })
+            });
+            if(r.ok) {
+                alert(`Google Meet link updated for ${targetClass}!`);
+                document.getElementById('meet-link-input').value = '';
+                updateLiveMeetButton();
+            } else {
+                const d = await r.json();
+                alert(d.detail);
+            }
         }
 
         function startClock() {
@@ -711,15 +826,9 @@ def index():
             out.innerText = d.answer;
         }
 
-        function updateLiveFrame() {
-            const c = document.getElementById('sel-class').value.replace(/[^a-zA-Z0-9]/g, '');
-            const m = document.getElementById('sel-med').value.replace(/[^a-zA-Z0-9]/g, '');
-            document.getElementById('jitsi-stage').src = `https://meet.jit.si/GVHSS_KUNIYA_${c}_${m}_ROOM#userInfo.displayName="${me ? me.name : 'Student'}"`;
-        }
-
         async function fetchUserDirectory() {
             if(!me || me.role !== 'admin') return;
-            const r = await fetch(`/api/users?admin_user=${encodeURIComponent(adminAuth.u)}&admin_pass=${encodeURIComponent(adminAuth.p)}`);
+            const r = await fetch(`/api/users?auth_user=${encodeURIComponent(staffAuth.u)}&auth_pass=${encodeURIComponent(staffAuth.p)}`);
             const d = await r.json();
             if(!r.ok) return;
             const box = document.getElementById('user-table');
@@ -739,13 +848,10 @@ def index():
 
         async function createUser(e) {
             e.preventDefault();
-            if(!me || me.role !== 'admin') {
-                alert("Unauthorized!");
-                return;
-            }
+            if(!me || me.role !== 'admin') return;
             const body = {
-                admin_user: adminAuth.u,
-                admin_pass: adminAuth.p,
+                auth_user: staffAuth.u,
+                auth_pass: staffAuth.p,
                 username: document.getElementById('new-u').value,
                 password: document.getElementById('new-p').value,
                 name: document.getElementById('new-name').value,
@@ -770,19 +876,19 @@ def index():
             const r = await fetch(`/api/users/delete/${username}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ admin_user: adminAuth.u, admin_pass: adminAuth.p })
+                body: JSON.stringify({ auth_user: staffAuth.u, auth_pass: staffAuth.p })
             });
             if(r.ok) fetchUserDirectory();
         }
 
         async function postNotice() {
-            if(!me || me.role !== 'admin') return;
+            if(!me || (me.role !== 'admin' && me.role !== 'teacher')) return;
             const text = document.getElementById('new-notice').value;
             if(!text) return;
             const r = await fetch('/api/notice', { 
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ admin_user: adminAuth.u, admin_pass: adminAuth.p, notice_text: text }) 
+                body: JSON.stringify({ auth_user: staffAuth.u, auth_pass: staffAuth.p, notice_text: text }) 
             });
             if(r.ok) {
                 document.getElementById('new-notice').value = '';
@@ -792,9 +898,8 @@ def index():
         }
 
         function nav(tabId) {
-            // സുരക്ഷ: അഡ്മിൻ അല്ലാതെ അഡ്മിൻ ടാബിലേക്ക് പോകാൻ ശ്രമിച്ചാൽ ബ്ലോക്ക് ചെയ്യുക
-            if(tabId === 'admin' && (!me || me.role !== 'admin')) {
-                alert("Access Denied: Only administrators have access to this section.");
+            if(tabId === 'admin' && (!me || (me.role !== 'admin' && me.role !== 'teacher'))) {
+                alert("Access Denied: Staff access only.");
                 return;
             }
 
@@ -804,7 +909,7 @@ def index():
             });
             document.getElementById(`view-${tabId}`).classList.remove('hidden');
             document.getElementById(`tb-${tabId}`).className = "px-5 py-2.5 font-bold text-sm rounded-xl bg-amber-500 text-black";
-            if(tabId === 'live') updateLiveFrame();
+            if(tabId === 'live') updateLiveMeetButton();
         }
     </script>
 </body>
