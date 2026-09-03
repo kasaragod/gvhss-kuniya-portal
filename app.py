@@ -13,164 +13,172 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- MODERN LIGHT / RESPONSIVE UI -----------------
+# ----------------- 100% FIXED CSS (NO ICON GLITCH / HIGH CONTRAST) -----------------
 st.markdown("""
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manjari:wght@400;700&display=swap');
 
-    html, body, [class*="css"], * {
-        font-family: 'Inter', 'Manjari', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    /* 1. ഫോണ്ട് ഗ്ലിച്ച് പരിഹരിക്കാൻ: ഐക്കണുകളെ വെറുതെ വിടുക, പ്രധാന ഭാഗങ്ങൾക്ക് മാത്രം ഫോണ്ട് നൽകുക */
+    html, body, p, div, button, input, select, textarea, label {
+        font-family: 'Inter', 'Manjari', sans-serif;
     }
 
+    /* Streamlit-ന്റെ ഐക്കൺ ഫോണ്ടുകൾ ടെക്സ്റ്റായി മാറുന്നത് തടയുന്നു */
+    [data-testid="stIconMaterial"], 
+    .material-symbols-rounded, 
+    .material-icons,
+    [data-testid="stSidebarCollapseButton"] *,
+    [data-testid="collapsedControl"] * {
+        font-family: 'Material Symbols Rounded', 'Material Icons' !important;
+        font-style: normal !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        display: inline-block !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+    }
+
+    /* 2. മൊബൈലിലും ഡെസ്ക്ടോപ്പിലും ഹൈ-കോൺട്രാസ്റ്റ് പശ്ചാത്തലം */
     .stApp {
         background-color: #F8FAFC !important;
-        color: #0F172A !important;
     }
 
     .main .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 2.5rem !important;
-        max-width: 1200px !important;
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 1100px !important;
     }
 
-    /* Header */
+    /* സ്കൂൾ ഹെഡർ കാർഡ് */
     .school-card {
         background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 16px;
-        padding: 20px 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        border: 1px solid #CBD5E1;
+        border-radius: 14px;
+        padding: 16px 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
-        gap: 12px;
+        gap: 10px;
     }
     .school-title {
-        font-size: 1.6rem;
+        font-size: 1.45rem;
         font-weight: 800;
-        color: #1E3A8A;
+        color: #1E3A8A !important;
         margin: 0;
         letter-spacing: -0.5px;
     }
     .school-sub {
-        color: #64748B;
-        font-size: 0.9rem;
+        color: #475569 !important;
+        font-size: 0.88rem;
         font-weight: 500;
-        margin-top: 4px;
+        margin-top: 2px;
     }
     .user-badge {
         background: #EFF6FF;
         border: 1px solid #BFDBFE;
-        padding: 8px 16px;
-        border-radius: 12px;
+        padding: 6px 14px;
+        border-radius: 10px;
         text-align: right;
     }
 
-    /* Notice Card */
+    /* നോട്ടീസ് ബോർഡ് */
     .notice-card {
         background: #FFFBEB;
-        border: 1px solid #FDE68A;
-        border-left: 4px solid #F59E0B;
-        padding: 14px 18px;
-        border-radius: 10px;
-        color: #92400E;
+        border: 1px solid #FCD34D;
+        border-left: 5px solid #F59E0B;
+        padding: 12px 16px;
+        border-radius: 8px;
+        color: #78350F !important;
         font-size: 0.92rem;
-        font-weight: 500;
-        margin-bottom: 20px;
-        line-height: 1.5;
+        font-weight: 600;
+        margin-bottom: 16px;
+        line-height: 1.4;
     }
 
-    /* Form Fields */
-    input, textarea, select {
+    /* എല്ലാ ഡ്രോപ്പ്ഡൗണുകളും ഇൻപുട്ടുകളും മൊബൈലിൽ തെളിഞ്ഞു കാണാൻ */
+    div[data-baseweb="select"] > div, input, textarea {
         background-color: #FFFFFF !important;
         color: #0F172A !important;
-        border: 1.5px solid #CBD5E1 !important;
+        border: 1.5px solid #94A3B8 !important;
         border-radius: 8px !important;
-        font-size: 0.95rem !important;
-    }
-    input:focus, textarea:focus {
-        border-color: #2563EB !important;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+        font-weight: 500 !important;
     }
 
-    /* KBC Hot Seat Card */
+    /* ലേബലുകൾ കറുത്ത നിറത്തിൽ വ്യക്തമായി കാണാൻ */
+    label[data-testid="stWidgetLabel"] p {
+        color: #1E293B !important;
+        font-weight: 700 !important;
+        font-size: 0.92rem !important;
+    }
+
+    /* KBC ഹോട്ട് സീറ്റ് കാർഡ് */
     .kbc-box {
         background: #0F172A;
         border: 2px solid #F59E0B;
-        border-radius: 18px;
-        padding: 28px 20px;
+        border-radius: 16px;
+        padding: 24px 16px;
         text-align: center;
-        color: #FFFFFF;
-        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.25);
-        margin-bottom: 22px;
+        color: #FFFFFF !important;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        margin-bottom: 18px;
     }
     .kbc-label {
         display: inline-block;
         background: #F59E0B;
-        color: #000000;
-        font-weight: 700;
-        font-size: 0.78rem;
-        padding: 4px 14px;
+        color: #000000 !important;
+        font-weight: 800;
+        font-size: 0.75rem;
+        padding: 4px 12px;
         border-radius: 9999px;
         text-transform: uppercase;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
     }
     .kbc-q-title {
-        font-size: 1.35rem;
+        font-size: 1.25rem;
         font-weight: 700;
-        color: #FFFFFF;
-        line-height: 1.6;
-        margin: 5px auto;
-        max-width: 800px;
+        color: #FFFFFF !important;
+        line-height: 1.5;
+        margin: 4px auto;
+        max-width: 750px;
     }
 
-    /* Tabs */
+    /* ടാബ് നാവിഗേഷൻ വൃത്തിയാക്കൽ */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 6px;
         background-color: #E2E8F0;
-        padding: 6px;
-        border-radius: 12px;
+        padding: 4px;
+        border-radius: 10px;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: transparent;
-        border-radius: 8px;
-        color: #475569 !important;
-        font-weight: 600;
-        padding: 8px 18px;
+        border-radius: 6px;
+        color: #334155 !important;
+        font-weight: 700;
+        padding: 6px 14px;
         border: none;
     }
     .stTabs [aria-selected="true"] {
         background-color: #FFFFFF !important;
         color: #1E3A8A !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     }
 
-    /* Buttons */
+    /* ബട്ടണുകൾ */
     .stButton>button {
-        background: #2563EB;
+        background: #2563EB !important;
         color: #FFFFFF !important;
         font-weight: 600 !important;
-        border-radius: 8px;
-        border: none;
-        padding: 8px 18px;
-        transition: all 0.2s ease;
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 8px 16px !important;
     }
     .stButton>button:hover {
-        background: #1D4ED8;
-    }
-
-    /* Login Box */
-    .auth-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 16px;
-        padding: 35px 28px;
-        max-width: 420px;
-        margin: 40px auto;
-        box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.08);
-        text-align: center;
+        background: #1D4ED8 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -210,7 +218,7 @@ def get_subjects(cls_name, medium):
         "History", "Economics", "Political Science", "Sociology", "English"
     ]
 
-# ----------------- DATABASE MANAGEMENT -----------------
+# ----------------- DATABASE -----------------
 DB_FILE = "kuniya_portal.db"
 
 def init_db():
@@ -249,7 +257,7 @@ def init_db():
         )
     ''')
     
-    # Pre-seed Admin
+    # Pre-seed Admin and Teachers
     c.execute('SELECT * FROM users WHERE username = ?', ('admin',))
     if not c.fetchone():
         c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', 
@@ -259,22 +267,16 @@ def init_db():
         c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)', 
                   ('student1', 'student123', 'Arjun K', 'student', 'Class 10 (SSLC)', 'Malayalam Medium'))
         c.execute('INSERT INTO notices (notice_text) VALUES (?)', 
-                  ('Welcome to the official digital portal of GVHSS KUNIYA. Academic sessions are active.',))
+                  ('Welcome to the official digital portal of GVHSS KUNIYA. Classes are active.',))
 
-    # Pre-seed Questions for both Malayalam and English medium
     c.execute('SELECT COUNT(*) FROM kbc_questions')
     if c.fetchone()[0] == 0:
         sample_q = [
-            # Malayalam Medium Questions
             ("Class 10 (SSLC)", "ഗണിതം (Mathematics)", "Malayalam Medium", "4, 7, 10, 13... എന്ന സമാന്തരശ്രേണിയുടെ പൊതുവ്യത്യാസം എത്രയാണ്?", "2", "3", "4", "5", 1, "പൊതുവ്യത്യാസം d = 7 - 4 = 3 ആണ്."),
             ("Class 10 (SSLC)", "ഭൗതികശാസ്ത്രം (Physics)", "Malayalam Medium", "ആകാശത്തിന് നീലനിറം കാണപ്പെടാൻ കാരണമായ പ്രതിഭാസം ഏത്?", "പ്രതിപതനം", "പൂർണ്ണാന്തര പ്രതിപതനം", "പ്രകാശ വിസരണം", "പ്രകീർണ്ണനം", 2, "പ്രകാശത്തിന്റെ വിസരണം (Scattering) കാരണമാണ് ആകാശം നീലനിറമായി കാണപ്പെടുന്നത്."),
             ("Class 10 (SSLC)", "രസതന്ത്രം (Chemistry)", "Malayalam Medium", "ബേക്കിംഗ് സോഡയുടെ രാസനാമം എന്താണ്?", "സോഡിയം ക്ലോറൈഡ്", "സോഡിയം ഹൈഡ്രജൻ കാർബണേറ്റ്", "കാൽസ്യം ഹൈഡ്രോക്സൈഡ്", "സോഡിയം ഹൈഡ്രോക്സൈഡ്", 1, "സോഡിയം ഹൈഡ്രജൻ കാർബണേറ്റ് (NaHCO3) ആണ് ബേക്കിംഗ് സോഡ."),
-            ("Class 10 (SSLC)", "ജീവശാസ്ത്രം (Biology)", "Malayalam Medium", "കോശത്തിന്റെ ഊർജ്ജ നിലയം എന്നറിയപ്പെടുന്നത് ഏത് ഭാഗമാണ്?", "റൈബോസോം", "മൈറ്റോകോൺഡ്രിയ", "ന്യൂക്ലിയസ്", "ഗോൾഗി ബോഡി", 1, "കോശത്തിന് ആവശ്യമായ ATP ഊർജ്ജം ഉൽപ്പാദിപ്പിക്കുന്നത് മൈറ്റോകോൺഡ്രിയ ആണ്."),
-            
-            # English Medium Questions
-            ("Class 10 (SSLC)", "Mathematics", "English Medium", "What is the common difference of the Arithmetic Progression: 4, 7, 10, 13...?", "2", "3", "4", "5", 1, "Common difference d = 7 - 4 = 3."),
-            ("Class 10 (SSLC)", "Physics", "English Medium", "Which optical phenomenon causes the blue appearance of the sky?", "Reflection", "Total Internal Reflection", "Scattering of Light", "Dispersion", 2, "Rayleigh scattering of sunlight causes the blue appearance of the sky."),
-            ("Class 10 (SSLC)", "Chemistry", "English Medium", "What is the chemical formula of baking soda?", "NaCl", "NaHCO3", "NaOH", "Ca(OH)2", 1, "Sodium Hydrogen Carbonate (NaHCO3) is baking soda.")
+            ("Class 10 (SSLC)", "Mathematics", "English Medium", "What is the common difference of the AP: 4, 7, 10, 13...?", "2", "3", "4", "5", 1, "Common difference d = 7 - 4 = 3."),
+            ("Class 10 (SSLC)", "Physics", "English Medium", "Which phenomenon causes the blue appearance of the clear sky?", "Reflection", "Total Internal Reflection", "Scattering of Light", "Dispersion", 2, "Scattering of light is responsible for the blue color.")
         ]
         for q in sample_q:
             c.execute('''
@@ -350,7 +352,6 @@ def fetch_kbc_question(target_class, subject, medium):
     ''', (target_class, subject, medium))
     row = c.fetchone()
     if not row:
-        # Fallback to any question in that medium
         c.execute('''
             SELECT id, question, opt_a, opt_b, opt_c, opt_d, correct_idx, explanation 
             FROM kbc_questions 
@@ -390,23 +391,21 @@ def insert_batch_kbc_questions(target_class, subject, medium, q_list):
     conn.close()
 
 def generate_ai_kbc_batch(client, target_class, subject, medium, count=10):
-    lang_inst = "Generate the questions, options, and explanations in clear and authentic Malayalam." if "Malayalam" in medium else "Generate the questions, options, and explanations in English."
+    lang_inst = "Generate questions and options in clean Malayalam." if "Malayalam" in medium else "Generate questions and options in English."
     prompt = f"""
-    Create {count} multiple-choice quiz questions based on the Kerala SCERT textbook curriculum for GVHSS KUNIYA.
+    Create {count} multiple-choice quiz questions based on the Kerala SCERT syllabus for GVHSS KUNIYA.
     Class: {target_class}
     Subject: {subject}
     Medium: {medium}
+    {lang_inst}
     
-    Instruction: {lang_inst}
-    
-    Provide 4 options with one correct answer index (0, 1, 2, or 3).
     Return ONLY a JSON array with this schema:
     [
       {{
-        "q": "Question text here?",
+        "q": "Question text?",
         "options": ["Option A", "Option B", "Option C", "Option D"],
         "answer_idx": 0,
-        "exp": "Detailed explanation note"
+        "exp": "Explanation"
       }}
     ]
     """
@@ -449,13 +448,13 @@ def login_screen():
     _, col, _ = st.columns([1, 1.4, 1])
     with col:
         st.markdown("""
-            <div class="auth-card">
-                <h2 style="color: #1E3A8A; font-weight: 800; margin-bottom: 4px;">GVHSS KUNIYA</h2>
-                <div style="color: #64748B; font-size: 0.9rem; margin-bottom: 24px;">Digital Campus Learning Portal</div>
+            <div style="background:#FFFFFF; border:1px solid #CBD5E1; border-radius:14px; padding:28px 22px; text-align:center; box-shadow: 0 4px 12px rgba(0,0,0,0.06); margin-top: 30px;">
+                <h2 style="color: #1E3A8A; font-weight: 800; margin: 0 0 6px 0;">GVHSS KUNIYA</h2>
+                <div style="color: #64748B; font-size: 0.9rem; margin-bottom: 20px;">Digital Campus Learning Portal</div>
             </div>
         """, unsafe_allow_html=True)
         with st.form("login_form"):
-            uid = st.text_input("User ID", placeholder="e.g. admin or student1").strip().lower()
+            uid = st.text_input("User ID", placeholder="admin / student1").strip().lower()
             pwd = st.text_input("Password", type="password", placeholder="••••••••").strip()
             submit = st.form_submit_button("Sign In", use_container_width=True)
             if submit:
@@ -485,13 +484,13 @@ st.markdown(f"""
             <div class="school-sub">Govt Vocational Higher Secondary School, Kuniya • Kasaragod</div>
         </div>
         <div class="user-badge">
-            <div style="font-size: 0.75rem; color: #64748B; font-weight: 600;">ACTIVE SESSION</div>
-            <div style="color: #1E3A8A; font-weight: 700; font-size: 0.95rem;">{st.session_state['display_name']} ({st.session_state['role'].upper()})</div>
+            <div style="font-size: 0.72rem; color: #64748B; font-weight: 700;">ACTIVE SESSION</div>
+            <div style="color: #1E3A8A; font-weight: 800; font-size: 0.92rem;">{st.session_state['display_name']} ({st.session_state['role'].upper()})</div>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
-# School Notice
+# Notice
 notice = get_latest_notice()
 st.markdown(f'<div class="notice-card">📢 <strong>Notice:</strong> {notice}</div>', unsafe_allow_html=True)
 
@@ -500,7 +499,6 @@ st.sidebar.markdown("### Profile")
 st.sidebar.write(f"**Name:** {st.session_state['display_name']}")
 st.sidebar.write(f"**Role:** {st.session_state['role'].capitalize()}")
 
-# Medium Switcher
 medium_idx = 0 if st.session_state["medium"] == "Malayalam Medium" else 1
 selected_medium = st.sidebar.radio("Instruction Medium", ["Malayalam Medium", "English Medium"], index=medium_idx)
 if selected_medium != st.session_state["medium"]:
@@ -573,7 +571,7 @@ if st.session_state["role"] == "admin":
                 st.success("Notice updated!")
                 st.rerun()
 
-# ----------------- TABS (MOBILE & DESKTOP FRIENDLY) -----------------
+# ----------------- TABS -----------------
 tab_kbc, tab_live, tab_doubt, tab_img = st.tabs([
     "🏆 KBC Challenge", 
     "🎥 Live Classroom", 
@@ -591,7 +589,7 @@ with tab_kbc:
     with col_sc2:
         st.metric("🔥 Streak", f"{st.session_state['kbc_streak']}")
     with col_sc3:
-        st.metric(f"📚 Question Pool ({selected_medium})", f"{q_count}")
+        st.metric(f"📚 Question Pool", f"{q_count}")
 
     if st.session_state["kbc_q"] is None:
         q_data = fetch_kbc_question(selected_class, subject, selected_medium)
@@ -620,7 +618,6 @@ with tab_kbc:
             </div>
         """, unsafe_allow_html=True)
         
-        # Lifeline
         if not st.session_state["kbc_fifty_used"] and not st.session_state["kbc_answered"]:
             if st.button("⚖️ 50:50 Lifeline"):
                 correct = curr["correct_idx"]
@@ -629,7 +626,6 @@ with tab_kbc:
                 st.session_state["kbc_fifty_used"] = True
                 st.rerun()
 
-        # 2x2 Clean Responsive Options
         labels = ["A", "B", "C", "D"]
         c1, c2 = st.columns(2)
         
@@ -694,9 +690,7 @@ with tab_doubt:
                 Class: {selected_class}
                 Subject: {subject}
                 Instruction Medium: {selected_medium}
-                
                 Language Requirement: {lang_target}
-                
                 Question: {user_q}
                 """
                 res = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
